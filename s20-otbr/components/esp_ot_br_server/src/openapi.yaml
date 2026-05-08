@@ -291,6 +291,57 @@ paths:
           description: Successfully created the pending operational dataset.
         "400":
           description: Invalid request body.
+  /ota:
+    post:
+      tags:
+        - node
+      summary: Queue a remote combined OTA update.
+      description: |-
+        Starts a combined host and RCP OTA update from a remote HTTP or HTTPS URL.
+        The request returns immediately after the OTA job is accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: HTTP or HTTPS URL of the combined host+RCP OTA image.
+                  example: https://example.com/otbr_ota.bin
+      responses:
+        "202":
+          description: OTA request accepted.
+        "400":
+          description: Invalid OTA URL.
+        "409":
+          description: Another OTA update is already in progress.
+  /ota/upload:
+    post:
+      tags:
+        - node
+      summary: Upload a local combined OTA image.
+      description: |-
+        Uploads one combined host and RCP OTA image directly to the device.
+        The request body must contain the raw image bytes, not multipart form data.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: OTA upload completed and the device will reboot.
+        "400":
+          description: Invalid or incomplete uploaded OTA image.
+        "409":
+          description: Another OTA update is already in progress.
 components:
   schemas:
     LeaderData:

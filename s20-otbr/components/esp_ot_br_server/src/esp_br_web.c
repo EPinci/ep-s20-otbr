@@ -5,6 +5,7 @@
  */
 
 #include <limits.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -27,9 +28,12 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
 #include "esp_ot_ota_commands.h"
+#include "esp_rcp_firmware.h"
+#include "esp_rcp_ota.h"
 #include "esp_spiffs.h"
 #include "esp_system.h"
 #include "esp_vfs.h"
@@ -58,6 +62,8 @@
 #define LOG_SSE_KEEPALIVE_MS 3000
 #define OTA_TASK_STACK_SIZE 6144
 #define OTA_TASK_PRIORITY 5
+#define OTA_RESTART_TASK_STACK_SIZE 2048
+#define OTA_RESTART_DELAY_MS 200
 
 extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
 #define OTA_URL_MAX_LEN 512
@@ -255,6 +261,11 @@ static esp_err_t esp_otbr_current_node_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_logs_stream_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_ping_post_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_ota_upload_post_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_ota_upload_app_post_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_ota_upload_rcp_post_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_ota_upload_web_post_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_ota_restart_post_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_ipaddr_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_add_ipaddr_post_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_delete_ipaddr_post_handler(httpd_req_t *req);
@@ -330,6 +341,36 @@ static httpd_uri_t s_web_gui_handlers[] = {
         .uri = ESP_OT_REST_API_OTA_PATH,
         .method = HTTP_POST,
         .handler = esp_otbr_ota_post_handler,
+        .user_ctx = &s_server.data,
+    },
+    {
+        .uri = ESP_OT_REST_API_OTA_UPLOAD_PATH,
+        .method = HTTP_POST,
+        .handler = esp_otbr_ota_upload_post_handler,
+        .user_ctx = &s_server.data,
+    },
+    {
+        .uri = ESP_OT_REST_API_OTA_UPLOAD_APP_PATH,
+        .method = HTTP_POST,
+        .handler = esp_otbr_ota_upload_app_post_handler,
+        .user_ctx = &s_server.data,
+    },
+    {
+        .uri = ESP_OT_REST_API_OTA_UPLOAD_RCP_PATH,
+        .method = HTTP_POST,
+        .handler = esp_otbr_ota_upload_rcp_post_handler,
+        .user_ctx = &s_server.data,
+    },
+    {
+        .uri = ESP_OT_REST_API_OTA_UPLOAD_WEB_PATH,
+        .method = HTTP_POST,
+        .handler = esp_otbr_ota_upload_web_post_handler,
+        .user_ctx = &s_server.data,
+    },
+    {
+        .uri = ESP_OT_REST_API_OTA_RESTART_PATH,
+        .method = HTTP_POST,
+        .handler = esp_otbr_ota_restart_post_handler,
         .user_ctx = &s_server.data,
     },
     {
@@ -686,6 +727,34 @@ static bool ota_url_is_valid(const char *url)
            strncmp(url, "https://", strlen("https://")) == 0;
 }
 
+static bool ota_upload_content_type_is_valid(httpd_req_t *req)
+{
+    size_t header_len = httpd_req_get_hdr_value_len(req, "Content-Type");
+    char *content_type = NULL;
+    bool valid = true;
+
+    if (header_len == 0)
+    {
+        return true;
+    }
+
+    content_type = calloc(header_len + 1, sizeof(char));
+    if (!content_type)
+    {
+        return false;
+    }
+
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, header_len + 1) != ESP_OK)
+    {
+        free(content_type);
+        return false;
+    }
+
+    valid = strncasecmp(content_type, "application/octet-stream", strlen("application/octet-stream")) == 0;
+    free(content_type);
+    return valid;
+}
+
 static bool ota_try_acquire_slot(void)
 {
     bool acquired = false;
@@ -755,6 +824,261 @@ static void ota_update_task(void *ctx)
     }
 
     vTaskDelete(NULL);
+}
+
+static void ota_restart_task(void *ctx)
+{
+    (void)ctx;
+    vTaskDelay(pdMS_TO_TICKS(OTA_RESTART_DELAY_MS));
+    esp_restart();
+}
+
+static esp_err_t ota_begin_host_update(esp_ota_handle_t *host_ota_handle, const esp_partition_t **update_partition)
+{
+    *update_partition = esp_ota_get_next_update_partition(NULL);
+    ESP_RETURN_ON_FALSE(*update_partition != NULL, ESP_ERR_NOT_FOUND, WEB_TAG, "Failed to find ota partition");
+
+    return esp_ota_begin(*update_partition, OTA_WITH_SEQUENTIAL_WRITES, host_ota_handle);
+}
+
+static esp_err_t ota_receive_uploaded_image(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    esp_rcp_ota_handle_t rcp_ota_handle = 0;
+    esp_ota_handle_t host_ota_handle = 0;
+    const esp_partition_t *update_partition = NULL;
+    uint8_t *buffer = NULL;
+    size_t remaining_len = req->content_len;
+    uint32_t host_fw_downloaded = 0;
+    uint32_t host_fw_size = 0;
+    bool host_update_started = false;
+
+    ESP_RETURN_ON_FALSE(remaining_len > 0, ESP_ERR_INVALID_ARG, WEB_TAG, "OTA upload body is empty");
+
+    buffer = malloc(FILE_CHUNK_SIZE);
+    ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate OTA upload buffer");
+    ESP_GOTO_ON_ERROR(esp_rcp_ota_begin(&rcp_ota_handle), exit, WEB_TAG, "Failed to begin RCP OTA");
+
+    while (remaining_len > 0)
+    {
+        size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
+        int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
+        size_t host_data_offset = 0;
+        size_t host_data_len = 0;
+
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            continue;
+        }
+        ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive OTA upload body");
+        remaining_len -= recv_len;
+
+        if (esp_rcp_ota_get_state(rcp_ota_handle) != ESP_RCP_OTA_STATE_FINISHED)
+        {
+            size_t rcp_received_len = 0;
+            ESP_GOTO_ON_ERROR(esp_rcp_ota_receive(rcp_ota_handle, buffer, recv_len, &rcp_received_len), exit, WEB_TAG,
+                              "Failed to receive uploaded RCP OTA data");
+            host_data_offset = rcp_received_len;
+
+            if (esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED)
+            {
+                host_fw_size = esp_rcp_ota_get_subfile_size(rcp_ota_handle, FILETAG_HOST_FIRMWARE);
+                ESP_GOTO_ON_FALSE(host_fw_size > 0, ESP_ERR_INVALID_ARG, exit, WEB_TAG,
+                                  "Uploaded OTA image does not contain host firmware");
+                ESP_GOTO_ON_ERROR(ota_begin_host_update(&host_ota_handle, &update_partition), exit, WEB_TAG,
+                                  "Failed to begin host OTA");
+                host_update_started = true;
+                ESP_LOGI(WEB_TAG, "Start writing uploaded border router firmware");
+            }
+        }
+
+        if (esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED)
+        {
+            host_data_len = recv_len - host_data_offset;
+            if (host_data_len > 0)
+            {
+                ESP_GOTO_ON_FALSE(host_update_started, ESP_ERR_INVALID_STATE, exit, WEB_TAG,
+                                  "Host OTA started before host partition was prepared");
+                ESP_GOTO_ON_FALSE(host_fw_downloaded + host_data_len <= host_fw_size, ESP_ERR_INVALID_SIZE, exit,
+                                  WEB_TAG, "Uploaded OTA image exceeds expected host firmware size");
+                ESP_GOTO_ON_ERROR(esp_ota_write(host_ota_handle, buffer + host_data_offset, host_data_len), exit,
+                                  WEB_TAG, "Failed to write uploaded host OTA data");
+                host_fw_downloaded += host_data_len;
+            }
+        }
+    }
+
+    ESP_GOTO_ON_FALSE(esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED, ESP_ERR_INVALID_ARG, exit,
+                      WEB_TAG, "Uploaded OTA image ended before RCP firmware completed");
+    ESP_GOTO_ON_FALSE(host_update_started, ESP_ERR_INVALID_ARG, exit, WEB_TAG,
+                      "Uploaded OTA image never reached the host firmware payload");
+    ESP_GOTO_ON_FALSE(host_fw_downloaded == host_fw_size, ESP_ERR_INVALID_SIZE, exit, WEB_TAG,
+                      "Uploaded OTA image ended before host firmware completed");
+
+    ret = esp_ota_end(host_ota_handle);
+    host_ota_handle = 0;
+    ESP_GOTO_ON_ERROR(ret, exit, WEB_TAG, "Failed to finalize uploaded host OTA");
+    ESP_GOTO_ON_ERROR(esp_ota_set_boot_partition(update_partition), exit, WEB_TAG,
+                      "Failed to set uploaded OTA boot partition");
+
+    ret = esp_rcp_ota_end(rcp_ota_handle);
+    if (ret != ESP_OK)
+    {
+        esp_ota_set_boot_partition(esp_ota_get_next_update_partition(NULL));
+    }
+    rcp_ota_handle = 0;
+
+exit:
+    free(buffer);
+    if (ret != ESP_OK && host_ota_handle)
+    {
+        esp_ota_abort(host_ota_handle);
+    }
+    if (ret != ESP_OK && rcp_ota_handle)
+    {
+        esp_rcp_ota_abort(rcp_ota_handle);
+    }
+    return ret;
+}
+
+static esp_err_t ota_receive_app_image(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    esp_ota_handle_t host_ota_handle = 0;
+    const esp_partition_t *update_partition = NULL;
+    uint8_t *buffer = NULL;
+    size_t remaining_len = req->content_len;
+
+    ESP_RETURN_ON_FALSE(remaining_len > 0, ESP_ERR_INVALID_ARG, WEB_TAG, "App OTA upload body is empty");
+
+    buffer = malloc(FILE_CHUNK_SIZE);
+    ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate app OTA upload buffer");
+    ESP_GOTO_ON_ERROR(ota_begin_host_update(&host_ota_handle, &update_partition), exit, WEB_TAG, "Failed to begin app OTA");
+
+    while (remaining_len > 0)
+    {
+        size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
+        int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
+
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            continue;
+        }
+        ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive app OTA upload body");
+        remaining_len -= recv_len;
+
+        ESP_GOTO_ON_ERROR(esp_ota_write(host_ota_handle, buffer, recv_len), exit, WEB_TAG, "Failed to write app OTA data");
+    }
+
+    ret = esp_ota_end(host_ota_handle);
+    host_ota_handle = 0;
+    ESP_GOTO_ON_ERROR(ret, exit, WEB_TAG, "Failed to finalize app OTA");
+    ESP_GOTO_ON_ERROR(esp_ota_set_boot_partition(update_partition), exit, WEB_TAG, "Failed to set app OTA boot partition");
+
+exit:
+    free(buffer);
+    if (ret != ESP_OK && host_ota_handle)
+    {
+        esp_ota_abort(host_ota_handle);
+    }
+    return ret;
+}
+
+static esp_err_t ota_receive_rcp_image(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    esp_rcp_ota_handle_t rcp_ota_handle = 0;
+    uint8_t *buffer = NULL;
+    size_t remaining_len = req->content_len;
+
+    ESP_RETURN_ON_FALSE(remaining_len > 0, ESP_ERR_INVALID_ARG, WEB_TAG, "RCP OTA upload body is empty");
+
+    buffer = malloc(FILE_CHUNK_SIZE);
+    ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate RCP OTA upload buffer");
+    ESP_GOTO_ON_ERROR(esp_rcp_ota_begin(&rcp_ota_handle), exit, WEB_TAG, "Failed to begin RCP OTA");
+
+    while (remaining_len > 0)
+    {
+        size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
+        int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
+
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            continue;
+        }
+        ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive RCP OTA upload body");
+        remaining_len -= recv_len;
+
+        if (esp_rcp_ota_get_state(rcp_ota_handle) != ESP_RCP_OTA_STATE_FINISHED)
+        {
+            size_t rcp_received_len = 0;
+            ESP_GOTO_ON_ERROR(esp_rcp_ota_receive(rcp_ota_handle, buffer, recv_len, &rcp_received_len), exit, WEB_TAG,
+                              "Failed to receive uploaded RCP OTA data");
+        }
+    }
+
+    ESP_GOTO_ON_FALSE(esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED, ESP_ERR_INVALID_ARG, exit,
+                      WEB_TAG, "Uploaded RCP OTA image ended before RCP firmware completed");
+
+    ret = esp_rcp_ota_end(rcp_ota_handle);
+    rcp_ota_handle = 0;
+    ESP_GOTO_ON_ERROR(ret, exit, WEB_TAG, "Failed to finalize RCP OTA");
+
+exit:
+    free(buffer);
+    if (ret != ESP_OK && rcp_ota_handle)
+    {
+        esp_rcp_ota_abort(rcp_ota_handle);
+    }
+    return ret;
+}
+
+static esp_err_t ota_receive_web_image(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    uint8_t *buffer = NULL;
+    size_t remaining_len = req->content_len;
+    size_t written = 0;
+
+    const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                                                ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "web_storage");
+    ESP_RETURN_ON_FALSE(partition != NULL, ESP_ERR_NOT_FOUND, WEB_TAG, "Failed to find web_storage partition");
+    ESP_RETURN_ON_FALSE(remaining_len == (size_t)partition->size, ESP_ERR_INVALID_SIZE, WEB_TAG,
+                        "Uploaded web image size (%zu) does not match partition size (%u)",
+                        remaining_len, (unsigned)partition->size);
+
+    buffer = malloc(FILE_CHUNK_SIZE);
+    ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate web OTA upload buffer");
+
+    esp_err_t unregister_ret = esp_vfs_spiffs_unregister("web_storage");
+    if (unregister_ret != ESP_OK)
+    {
+        ESP_LOGW(WEB_TAG, "Could not unmount web_storage before write: %s", esp_err_to_name(unregister_ret));
+    }
+
+    ESP_GOTO_ON_ERROR(esp_partition_erase_range(partition, 0, partition->size), exit, WEB_TAG,
+                      "Failed to erase web_storage partition");
+
+    while (remaining_len > 0)
+    {
+        size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
+        int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
+
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            continue;
+        }
+        ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive web OTA upload body");
+        remaining_len -= recv_len;
+
+        ESP_GOTO_ON_ERROR(esp_partition_write(partition, written, buffer, recv_len), exit, WEB_TAG,
+                          "Failed to write web OTA data");
+        written += recv_len;
+    }
+
+exit:
+    free(buffer);
+    return ret;
 }
 
 /*-----------------------------------------------------
@@ -1481,6 +1805,287 @@ exit:
         free(ota_request);
     }
     cJSON_Delete(request);
+    cJSON_Delete(response);
+    return ret;
+}
+
+static esp_err_t esp_otbr_ota_upload_post_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    char *http_status = "200 OK";
+    bool restart_required = false;
+    cJSON *error = NULL;
+    cJSON *result = NULL;
+    cJSON *message = NULL;
+    cJSON *response = NULL;
+
+    if (!ota_upload_content_type_is_valid(req))
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Upload a combined host+RCP OTA image as application/octet-stream.");
+        goto respond;
+    }
+
+    if (req->content_len <= 0)
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Select a non-empty combined host+RCP OTA image to upload.");
+        goto respond;
+    }
+
+    if (!ota_try_acquire_slot())
+    {
+        http_status = HTTPD_409;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
+        result = create_ota_result("busy", NULL);
+        message = cJSON_CreateString("An OTA update is already in progress.");
+        goto respond;
+    }
+
+    ret = ota_receive_uploaded_image(req);
+    if (ret != ESP_OK)
+    {
+        ota_release_slot();
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ret);
+        result = create_ota_result("upload_failed", NULL);
+        message = cJSON_CreateString("Failed to process the uploaded combined host+RCP OTA image.");
+        goto respond;
+    }
+
+    error = cJSON_CreateNumber((double)ESP_OK);
+    result = create_ota_result("accepted", NULL);
+    message = cJSON_CreateString("Upload completed. The device will reboot automatically after a successful update.");
+    restart_required = true;
+
+respond:
+    httpd_resp_set_status(req, http_status);
+    response = pack_response(error, result, message);
+    ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build OTA upload response");
+    ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
+
+exit:
+    cJSON_Delete(response);
+
+    if (restart_required)
+    {
+        if (xTaskCreate(ota_restart_task, "br_ota_restart", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY,
+                        NULL) != pdPASS)
+        {
+            esp_restart();
+        }
+    }
+
+    return ret;
+}
+
+static esp_err_t esp_otbr_ota_upload_app_post_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    char *http_status = "200 OK";
+    cJSON *error = NULL;
+    cJSON *result = NULL;
+    cJSON *message = NULL;
+    cJSON *response = NULL;
+
+    if (!ota_upload_content_type_is_valid(req))
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Upload the app firmware binary as application/octet-stream.");
+        goto respond;
+    }
+
+    if (req->content_len <= 0)
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Select a non-empty app firmware binary to upload.");
+        goto respond;
+    }
+
+    if (!ota_try_acquire_slot())
+    {
+        http_status = HTTPD_409;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
+        result = create_ota_result("busy", NULL);
+        message = cJSON_CreateString("An OTA update is already in progress.");
+        goto respond;
+    }
+
+    ret = ota_receive_app_image(req);
+    ota_release_slot();
+    if (ret != ESP_OK)
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ret);
+        result = create_ota_result("upload_failed", NULL);
+        message = cJSON_CreateString("Failed to process the uploaded app firmware binary.");
+        goto respond;
+    }
+
+    error = cJSON_CreateNumber((double)ESP_OK);
+    result = create_ota_result("accepted", NULL);
+    message = cJSON_CreateString("App firmware uploaded successfully.");
+
+respond:
+    httpd_resp_set_status(req, http_status);
+    response = pack_response(error, result, message);
+    ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build app OTA upload response");
+    ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
+
+exit:
+    cJSON_Delete(response);
+    return ret;
+}
+
+static esp_err_t esp_otbr_ota_upload_rcp_post_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    char *http_status = "200 OK";
+    cJSON *error = NULL;
+    cJSON *result = NULL;
+    cJSON *message = NULL;
+    cJSON *response = NULL;
+
+    if (!ota_upload_content_type_is_valid(req))
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Upload the RCP OTA image as application/octet-stream.");
+        goto respond;
+    }
+
+    if (req->content_len <= 0)
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Select a non-empty RCP OTA image to upload.");
+        goto respond;
+    }
+
+    if (!ota_try_acquire_slot())
+    {
+        http_status = HTTPD_409;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
+        result = create_ota_result("busy", NULL);
+        message = cJSON_CreateString("An OTA update is already in progress.");
+        goto respond;
+    }
+
+    ret = ota_receive_rcp_image(req);
+    ota_release_slot();
+    if (ret != ESP_OK)
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ret);
+        result = create_ota_result("upload_failed", NULL);
+        message = cJSON_CreateString("Failed to process the uploaded RCP OTA image.");
+        goto respond;
+    }
+
+    error = cJSON_CreateNumber((double)ESP_OK);
+    result = create_ota_result("accepted", NULL);
+    message = cJSON_CreateString("RCP firmware uploaded successfully.");
+
+respond:
+    httpd_resp_set_status(req, http_status);
+    response = pack_response(error, result, message);
+    ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build RCP OTA upload response");
+    ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
+
+exit:
+    cJSON_Delete(response);
+    return ret;
+}
+
+static esp_err_t esp_otbr_ota_upload_web_post_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    char *http_status = "200 OK";
+    cJSON *error = NULL;
+    cJSON *result = NULL;
+    cJSON *message = NULL;
+    cJSON *response = NULL;
+
+    if (!ota_upload_content_type_is_valid(req))
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Upload the web SPIFFS image as application/octet-stream.");
+        goto respond;
+    }
+
+    if (req->content_len <= 0)
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
+        result = create_ota_result("invalid_upload", NULL);
+        message = cJSON_CreateString("Select a non-empty web SPIFFS image to upload.");
+        goto respond;
+    }
+
+    if (!ota_try_acquire_slot())
+    {
+        http_status = HTTPD_409;
+        error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
+        result = create_ota_result("busy", NULL);
+        message = cJSON_CreateString("An OTA update is already in progress.");
+        goto respond;
+    }
+
+    ret = ota_receive_web_image(req);
+    ota_release_slot();
+    if (ret != ESP_OK)
+    {
+        http_status = HTTPD_400;
+        error = cJSON_CreateNumber((double)ret);
+        result = create_ota_result("upload_failed", NULL);
+        message = cJSON_CreateString("Failed to process the uploaded web SPIFFS image. Ensure it is exactly 200 KB.");
+        goto respond;
+    }
+
+    error = cJSON_CreateNumber((double)ESP_OK);
+    result = create_ota_result("accepted", NULL);
+    message = cJSON_CreateString("Web frontend uploaded successfully.");
+
+respond:
+    httpd_resp_set_status(req, http_status);
+    response = pack_response(error, result, message);
+    ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build web OTA upload response");
+    ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
+
+exit:
+    cJSON_Delete(response);
+    return ret;
+}
+
+static esp_err_t esp_otbr_ota_restart_post_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    cJSON *error = cJSON_CreateNumber((double)ESP_OK);
+    cJSON *result = create_ota_result("restarting", NULL);
+    cJSON *message = cJSON_CreateString("The device will restart now.");
+    cJSON *response = pack_response(error, result, message);
+    ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build OTA restart response");
+    ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
+
+    if (xTaskCreate(ota_restart_task, "br_ota_restart", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY,
+                    NULL) != pdPASS)
+    {
+        esp_restart();
+    }
+
+exit:
     cJSON_Delete(response);
     return ret;
 }

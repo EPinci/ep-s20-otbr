@@ -17,12 +17,13 @@
     <nav class="nav" id="nav"></nav>
     <div class="container">
         <h1 class="page-title">OTA Update</h1>
-        <p class="page-desc">Trigger a combined host and RCP firmware update from a remote image URL.</p>
+        <p class="page-desc">Trigger a combined firmware update from a remote image URL or upload the
+            images directly from your computer.</p>
 
         <div class="card section">
-            <div class="card-header">Start Update</div>
+            <div class="card-header">Remote Update</div>
             <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
-                Enter the HTTP or HTTPS URL of an OTA image produced for this border router.<br />
+                Enter the HTTP or HTTPS URL of an host and RCP OTA image produced for this border router.<br />
                 After a successful download, the device will restart automatically and the web UI may become unavailable
                 for a short time.
             </p>
@@ -43,6 +44,51 @@
             </form>
         </div>
 
+        <div class="card section">
+            <div class="card-header">Local Update</div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+                Select one or more firmware images to upload. At least one file must be selected.<br />
+                Each field is optional — only the files you choose will be uploaded, in order: app, RCP, web.<br />
+                After all uploads succeed the device will restart automatically and the web UI may become unavailable
+                for a short time.
+            </p>
+            <form id="otaUploadForm" onsubmit="return false">
+                <div class="form-group">
+                    <label class="form-label" for="otaAppFile">App Firmware</label>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <input class="form-input" id="otaAppFile" name="app" type="file"
+                            accept=".bin,application/octet-stream" style="flex:1">
+                        <span id="otaAppStatus" style="font-size:12px;white-space:nowrap"></span>
+                    </div>
+                    <div class="form-hint">Host (ESP32) application firmware binary.</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="otaRcpFile">RCP Firmware</label>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <input class="form-input" id="otaRcpFile" name="rcp" type="file"
+                            accept=".bin,application/octet-stream" style="flex:1">
+                        <span id="otaRcpStatus" style="font-size:12px;white-space:nowrap"></span>
+                    </div>
+                    <div class="form-hint">RCP OTA image in combined container format (no host firmware entry).</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="otaWebFile">Web Frontend</label>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <input class="form-input" id="otaWebFile" name="web" type="file"
+                            accept=".bin,application/octet-stream" style="flex:1">
+                        <span id="otaWebStatus" style="font-size:12px;white-space:nowrap"></span>
+                    </div>
+                    <div class="form-hint">SPIFFS image for the web_storage partition (must be exactly 200&nbsp;KB).
+                    </div>
+                </div>
+                <div class="flex-between">
+                    <button type="button" class="btn btn-primary" id="otaUploadBtn" onclick="uploadLocalImages()">Upload
+                        &amp; Reboot</button>
+                    <span id="otaUploadStatus" style="font-size:13px"></span>
+                </div>
+            </form>
+        </div>
+
         <div class="card section hidden" id="otaResultCard">
             <div class="card-header">Submission Result</div>
             <div id="otaResultBody" style="font-size:14px;color:var(--text-secondary)"></div>
@@ -52,58 +98,135 @@
 
     <script src="/static/api.js"></script>
     <script>
-        function renderOtaResult(message, isError) {
+        function renderOtaResult(title, message, isError) {
             var card = document.getElementById('otaResultCard');
             var body = document.getElementById('otaResultBody');
             card.classList.remove('hidden');
             body.innerHTML = '<div class="badge ' + (isError ? 'badge-danger' : 'badge-success') + '">' +
-                escapeHtml(isError ? 'Request Failed' : 'Request Accepted') + '</div>' +
+                escapeHtml(title) + '</div>' +
                 '<p style="margin-top:12px">' + escapeHtml(message) + '</p>';
+        }
+
+        function setOtaStatus(elementId, message, color) {
+            var status = document.getElementById(elementId);
+            status.textContent = message;
+            status.style.color = color;
+        }
+
+        function handleOtaResponse(data, successTitle, errorTitle, statusId, button, idleLabel, successLabel, successToast) {
+            var accepted = data && data.error === 0;
+            var message = data && data.message ? data.message : 'Unexpected OTA response';
+
+            renderOtaResult(accepted ? successTitle : errorTitle, message, !accepted);
+            if (accepted) {
+                setOtaStatus(statusId, successLabel, 'var(--success)');
+                button.textContent = successLabel;
+                showToast(successToast, 'success');
+                return;
+            }
+
+            button.disabled = false;
+            button.textContent = idleLabel;
+            setOtaStatus(statusId, 'Rejected', 'var(--danger)');
+            showToast(message, 'error');
         }
 
         function startOtaUpdate() {
             var urlInput = document.getElementById('otaUrl');
             var button = document.getElementById('otaBtn');
-            var status = document.getElementById('otaStatus');
             var url = urlInput.value.trim();
 
             if (!/^https?:\/\//i.test(url)) {
                 showToast('Enter a valid http:// or https:// URL', 'error');
-                renderOtaResult('Enter a valid http:// or https:// URL.', true);
+                renderOtaResult('Remote Request Failed', 'Enter a valid http:// or https:// URL.', true);
                 return;
             }
 
             button.disabled = true;
             button.textContent = 'Submitting...';
-            status.textContent = 'Sending OTA request...';
-            status.style.color = 'var(--primary)';
+            setOtaStatus('otaStatus', 'Sending OTA request...', 'var(--primary)');
 
             apiPost('/ota', { url: url }).then(function (data) {
-                var accepted = data && data.error === 0;
-                var message = data && data.message ? data.message : 'Unexpected OTA response';
-
-                renderOtaResult(message, !accepted);
-                if (accepted) {
-                    status.textContent = 'Accepted';
-                    status.style.color = 'var(--success)';
-                    button.textContent = 'Update Queued';
-                    showToast('OTA request accepted', 'success');
-                    return;
-                }
-
-                button.disabled = false;
-                button.textContent = 'Start OTA Update';
-                status.textContent = 'Rejected';
-                status.style.color = 'var(--danger)';
-                showToast(message, 'error');
+                handleOtaResponse(data, 'Remote Request Accepted', 'Remote Request Failed', 'otaStatus', button,
+                    'Start OTA Update', 'Update Queued', 'OTA request accepted');
             }).catch(function () {
                 button.disabled = false;
                 button.textContent = 'Start OTA Update';
-                status.textContent = 'Connection error';
-                status.style.color = 'var(--danger)';
-                renderOtaResult('Failed to submit the OTA request to the device.', true);
+                setOtaStatus('otaStatus', 'Connection error', 'var(--danger)');
+                renderOtaResult('Remote Request Failed', 'Failed to submit the OTA request to the device.', true);
                 showToast('Connection error', 'error');
             });
+        }
+
+        async function uploadLocalImages() {
+            var appFile = document.getElementById('otaAppFile').files[0];
+            var rcpFile = document.getElementById('otaRcpFile').files[0];
+            var webFile = document.getElementById('otaWebFile').files[0];
+            var button = document.getElementById('otaUploadBtn');
+
+            if (!appFile && !rcpFile && !webFile) {
+                showToast('Select at least one firmware image to upload', 'error');
+                renderOtaResult('Upload Failed', 'Select at least one firmware image to upload.', true);
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = 'Uploading...';
+            setOtaStatus('otaUploadStatus', 'Starting uploads...', 'var(--primary)');
+
+            var uploads = [
+                { file: appFile, statusId: 'otaAppStatus', label: 'App', url: '/ota/upload/app' },
+                { file: rcpFile, statusId: 'otaRcpStatus', label: 'RCP', url: '/ota/upload/rcp' },
+                { file: webFile, statusId: 'otaWebStatus', label: 'Web', url: '/ota/upload/web' },
+            ];
+
+            for (var i = 0; i < uploads.length; i++) {
+                var upload = uploads[i];
+                if (!upload.file) { continue; }
+
+                setOtaStatus(upload.statusId, 'Uploading...', 'var(--primary)');
+                setOtaStatus('otaUploadStatus', 'Uploading ' + upload.label + '...', 'var(--primary)');
+
+                try {
+                    var response = await fetch(upload.url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/octet-stream' },
+                        body: upload.file
+                    });
+                    var data = await response.json();
+                    if (!data || data.error !== 0) {
+                        var msg = data && data.message ? data.message : 'Upload failed';
+                        setOtaStatus(upload.statusId, 'Failed', 'var(--danger)');
+                        setOtaStatus('otaUploadStatus', upload.label + ' upload failed', 'var(--danger)');
+                        button.disabled = false;
+                        button.textContent = 'Upload & Reboot';
+                        renderOtaResult(upload.label + ' Upload Failed', msg, true);
+                        showToast(msg, 'error');
+                        return;
+                    }
+                    setOtaStatus(upload.statusId, 'Done', 'var(--success)');
+                } catch (e) {
+                    setOtaStatus(upload.statusId, 'Error', 'var(--danger)');
+                    setOtaStatus('otaUploadStatus', 'Connection error during ' + upload.label + ' upload', 'var(--danger)');
+                    button.disabled = false;
+                    button.textContent = 'Upload & Reboot';
+                    renderOtaResult(upload.label + ' Upload Failed',
+                        'Connection error during ' + upload.label + ' firmware upload.', true);
+                    showToast('Connection error', 'error');
+                    return;
+                }
+            }
+
+            setOtaStatus('otaUploadStatus', 'Rebooting...', 'var(--primary)');
+            renderOtaResult('Uploads Complete',
+                'All selected images uploaded successfully. The device is rebooting now.', false);
+            showToast('All uploads complete, rebooting', 'success');
+
+            try {
+                await fetch('/ota/restart', { method: 'POST' });
+            } catch (e) {
+                // ignore — device may have already started rebooting
+            }
         }
     </script>
 </body>
