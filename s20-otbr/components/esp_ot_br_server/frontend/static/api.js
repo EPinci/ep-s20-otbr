@@ -40,6 +40,20 @@ function apiPost(url, data) {
     .then(function (r) { return r.json(); });
 }
 
+function apiPut(url, data) {
+  return fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text().then(function (t) {
+      if (!t) return null;
+      try { return JSON.parse(t); } catch (e) { return t; }
+    });
+  });
+}
+
 /**
  * Get cached response for a GET endpoint, or null if not available.
  * Use this to render immediately on page load before the live fetch completes.
