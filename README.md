@@ -28,7 +28,7 @@ git submodule update --init --recursive
 
 Install SDK environment and build RCP firmware:
 ```
-./install.sh
+./utils/install-idf.sh
 ```
 
 Activate SDK environment:
