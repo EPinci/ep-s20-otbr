@@ -2,20 +2,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "driver/gpio.h"
 #include "led.h"
+#include "driver/gpio.h"
 
 int led_nwk_init()
 {
-    esp_err_t     ret;
+    esp_err_t ret;
     gpio_config_t io_conf = {0};
 
     memset(&io_conf, 0, sizeof(gpio_config_t));
-    io_conf.intr_type    = GPIO_INTR_DISABLE;
-    io_conf.mode         = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << CONFIG_LED_NWK_RED) | (1ULL << CONFIG_LED_NWK_GREEN) | (1ULL << CONFIG_LED_NWK_YELLOW);
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask =
+        (1ULL << CONFIG_LED_NWK_RED) | (1ULL << CONFIG_LED_NWK_GREEN) | (1ULL << CONFIG_LED_NWK_YELLOW);
     io_conf.pull_down_en = 0;
-    io_conf.pull_up_en   = 0;
+    io_conf.pull_up_en = 0;
 
     ret = gpio_config(&io_conf);
     if (ret)
@@ -30,15 +31,16 @@ int led_nwk_init()
 
 int led_thread_init()
 {
-    esp_err_t     ret;
+    esp_err_t ret;
     gpio_config_t io_conf = {0};
 
     memset(&io_conf, 0, sizeof(gpio_config_t));
-    io_conf.intr_type    = GPIO_INTR_DISABLE;
-    io_conf.mode         = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << CONFIG_LED_THREAD_RED) | (1ULL << CONFIG_LED_THREAD_GREEN) | (1ULL << CONFIG_LED_THREAD_YELLOW);
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask =
+        (1ULL << CONFIG_LED_THREAD_RED) | (1ULL << CONFIG_LED_THREAD_GREEN) | (1ULL << CONFIG_LED_THREAD_YELLOW);
     io_conf.pull_down_en = 0;
-    io_conf.pull_up_en   = 0;
+    io_conf.pull_up_en = 0;
 
     ret = gpio_config(&io_conf);
     if (ret)
@@ -53,15 +55,16 @@ int led_thread_init()
 
 int led_pwr_init()
 {
-    esp_err_t     ret;
+    esp_err_t ret;
     gpio_config_t io_conf = {0};
 
     memset(&io_conf, 0, sizeof(gpio_config_t));
-    io_conf.intr_type    = GPIO_INTR_DISABLE;
-    io_conf.mode         = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << CONFIG_LED_PWR_RED) | (1ULL << CONFIG_LED_PWR_GREEN) | (1ULL << CONFIG_LED_PWR_YELLOW);
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask =
+        (1ULL << CONFIG_LED_PWR_RED) | (1ULL << CONFIG_LED_PWR_GREEN) | (1ULL << CONFIG_LED_PWR_YELLOW);
     io_conf.pull_down_en = 0;
-    io_conf.pull_up_en   = 0;
+    io_conf.pull_up_en = 0;
 
     ret = gpio_config(&io_conf);
     if (ret)

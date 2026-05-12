@@ -1,9 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #include "esp_br_web_base.h"
 #include "cJSON.h"
 #include "esp_app_desc.h"

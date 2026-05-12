@@ -1,14 +1,7 @@
-/*
- * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #pragma once
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 #include "cJSON.h"
@@ -16,10 +9,10 @@ extern "C"
 #include "esp_http_server.h"
 #include "openthread/error.h"
 
-    /**
-     * @brief Initialize web API semaphores. Must be called once before handling any HTTP requests.
-     */
-    void esp_br_web_api_init(void);
+/**
+ * @brief Initialize web API semaphores. Must be called once before handling any HTTP requests.
+ */
+void esp_br_web_api_init(void);
 
 /*---------------------------------------------------------------------
             ESP Thread Border Router Wer Server REST API
@@ -71,264 +64,264 @@ extern "C"
 #define ESP_OT_REST_API_NETWORK_CURRENT_COMMISSION "/networks/commission"
 #define ESP_OT_REST_API_NETWORK_CURRENT_PREFIX "/networks/current/prefix"
 
-    /*---------------------------------------------------------------------
-                                Implement
-    ----------------------------------------------------------------------*/
-    /**
-     * @brief Provides an entry to obtain the Thread device's node information
-     *
-     * @return The cJSON object of Thread network node information
-     */
-    cJSON *handle_ot_resource_node_information_request(void);
+/*---------------------------------------------------------------------
+                            Implement
+----------------------------------------------------------------------*/
+/**
+ * @brief Provides an entry to obtain the Thread device's node information
+ *
+ * @return The cJSON object of Thread network node information
+ */
+cJSON *handle_ot_resource_node_information_request(void);
 
-    /**
-     * @brief Provides an entry to delete the Thread device's node information
-     *
-     * @return
-     *      -   OT_ERROR_NONE   :   On success.
-     *      -   Other           :   Fail to delete the node information .
-     */
-    otError handle_ot_resource_node_delete_information_request(void);
+/**
+ * @brief Provides an entry to delete the Thread device's node information
+ *
+ * @return
+ *      -   OT_ERROR_NONE   :   On success.
+ *      -   Other           :   Fail to delete the node information .
+ */
+otError handle_ot_resource_node_delete_information_request(void);
 
-    /**
-     * @brief Provide a entry to collect the Thread network topology message.
-     *
-     * @return The cJSON object of diagnostics
-     */
-    cJSON *handle_ot_resource_network_diagnostics_request(void);
+/**
+ * @brief Provide a entry to collect the Thread network topology message.
+ *
+ * @return The cJSON object of diagnostics
+ */
+cJSON *handle_ot_resource_network_diagnostics_request(void);
 
-    /**
-     * @brief Provide an entry to get current Thread node rloc
-     *
-     * @return The cJSON object of Thread node rloc
-     */
-    cJSON *handle_ot_resource_node_rloc_request(void);
+/**
+ * @brief Provide an entry to get current Thread node rloc
+ *
+ * @return The cJSON object of Thread node rloc
+ */
+cJSON *handle_ot_resource_node_rloc_request(void);
 
-    /**
-     * @brief Provide an entry to get current Thread node rloc16
-     *
-     * @return The cJSON object of Thread node rloc16
-     */
-    cJSON *handle_ot_resource_node_rloc16_request(void);
+/**
+ * @brief Provide an entry to get current Thread node rloc16
+ *
+ * @return The cJSON object of Thread node rloc16
+ */
+cJSON *handle_ot_resource_node_rloc16_request(void);
 
-    /**
-     * @brief Provide an entry to get current Thread node state
-     *
-     * @return The cJSON object of Thread node state
-     */
-    cJSON *handle_ot_resource_node_state_request(void);
+/**
+ * @brief Provide an entry to get current Thread node state
+ *
+ * @return The cJSON object of Thread node state
+ */
+cJSON *handle_ot_resource_node_state_request(void);
 
-    /**
-     * @brief Provide an entry to get current Thread node extended address
-     *
-     * @return The cJSON object of Thread node extended address
-     */
-    cJSON *handle_ot_resource_node_extaddress_request(void);
+/**
+ * @brief Provide an entry to get current Thread node extended address
+ *
+ * @return The cJSON object of Thread node extended address
+ */
+cJSON *handle_ot_resource_node_extaddress_request(void);
 
-    /**
-     * @brief Provide an entry to get current Thread network name
-     *
-     * @return The cJSON object of Thread node network name
-     */
-    cJSON *handle_ot_resource_node_network_name_request(void);
+/**
+ * @brief Provide an entry to get current Thread network name
+ *
+ * @return The cJSON object of Thread node network name
+ */
+cJSON *handle_ot_resource_node_network_name_request(void);
 
-    /**
-     * @brief Provide an entry to get current Thread leader data
-     *
-     * @return The cJSON object of Thread node leader data
-     */
-    cJSON *handle_ot_resource_node_leader_data_request(void);
+/**
+ * @brief Provide an entry to get current Thread leader data
+ *
+ * @return The cJSON object of Thread node leader data
+ */
+cJSON *handle_ot_resource_node_leader_data_request(void);
 
-    /**
-     * @brief Provide an entry to get Thread router number
-     *
-     * @return The cJSON object of Thread  number of router
-     */
-    cJSON *handle_ot_resource_node_numofrouter_request(void);
+/**
+ * @brief Provide an entry to get Thread router number
+ *
+ * @return The cJSON object of Thread  number of router
+ */
+cJSON *handle_ot_resource_node_numofrouter_request(void);
 
-    /**
-     * @brief Provide an entry to get Thread extended panid
-     *
-     * @return The cJSON object of Thread extended panid
-     */
-    cJSON *handle_ot_resource_node_extpanid_request(void);
+/**
+ * @brief Provide an entry to get Thread extended panid
+ *
+ * @return The cJSON object of Thread extended panid
+ */
+cJSON *handle_ot_resource_node_extpanid_request(void);
 
-    /**
-     * @brief Provide an entry to get Thread border agent id
-     *
-     * @return The cJSON object of border agent id
-     */
-    cJSON *handle_ot_resource_node_baid_request(void);
+/**
+ * @brief Provide an entry to get Thread border agent id
+ *
+ * @return The cJSON object of border agent id
+ */
+cJSON *handle_ot_resource_node_baid_request(void);
 
-    /**
-     * @brief Handle the Thread dataset get @param request and provide @param log
-     *
-     * @param [in] request  A cJSON format from http request for getting dataset.
-     * @param [out] log     A cJSON String type to record the result of getting dataset.
-     *
-     * @return              The cJSON object of Thread dataset
-     */
-    cJSON *handle_ot_resource_node_get_dataset_request(const cJSON *request, cJSON *log);
+/**
+ * @brief Handle the Thread dataset get @param request and provide @param log
+ *
+ * @param [in] request  A cJSON format from http request for getting dataset.
+ * @param [out] log     A cJSON String type to record the result of getting dataset.
+ *
+ * @return              The cJSON object of Thread dataset
+ */
+cJSON *handle_ot_resource_node_get_dataset_request(const cJSON *request, cJSON *log);
 
-    /**
-     * @brief Handle the Thread state configuration @param request
-     *
-     * @param [in] request  A cJSON format from http request for state configuration.
-     *
-     * @return
-     *      -   OT_ERROR_NONE           :   On success.
-     *      -   OT_ERROR_INVALID_ARGS   :   The @param request is invalid.
-     *      -   OT_ERROR_INVALID_STATE  :   Current device status does not allow state configuration.
-     */
-    otError handle_ot_resource_node_state_put_request(cJSON *request);
+/**
+ * @brief Handle the Thread state configuration @param request
+ *
+ * @param [in] request  A cJSON format from http request for state configuration.
+ *
+ * @return
+ *      -   OT_ERROR_NONE           :   On success.
+ *      -   OT_ERROR_INVALID_ARGS   :   The @param request is invalid.
+ *      -   OT_ERROR_INVALID_STATE  :   Current device status does not allow state configuration.
+ */
+otError handle_ot_resource_node_state_put_request(cJSON *request);
 
-    /**
-     * @brief Handle the Thread dataset set @param request and provide @param log
-     *
-     * @param [in] request  A cJSON format from http request for setting dataset.
-     * @param [out] log     A cJSON String type to record the result of setting dataset.
-     *
-     */
-    void handle_ot_resource_node_set_dataset_request(const cJSON *request, cJSON *log);
+/**
+ * @brief Handle the Thread dataset set @param request and provide @param log
+ *
+ * @param [in] request  A cJSON format from http request for setting dataset.
+ * @param [out] log     A cJSON String type to record the result of setting dataset.
+ *
+ */
+void handle_ot_resource_node_set_dataset_request(const cJSON *request, cJSON *log);
 
-    /**
-     * @brief Handle the Thread network formation @param request and provide @param log
-     *
-     * @param [in] request  A cJSON format from http request for forming network.
-     * @param [out] log     A cJSON String type to record the result of network formation.
-     *
-     * @return
-     *      -   OT_ERROR_NONE           :   On success.
-     *      -   OT_ERROR_INVALID_ARGS   :   The @param request or @param log is invalid.
-     *      -   OT_ERROR_INVALID_STATE  :   The network interface was not not up.
-     *      -   OT_ERROR_NO_BUFS        :   Insufficient buffer space to set the Active Operational Dataset.
-     *      -   OT_ERROR_NOT_IMPLEMENTED:   The platform does not implement settings functionality.
-     *      -   OT_ERROR_FAILED         :   Failed to form network.
-     */
-    otError handle_openthread_form_network_request(const cJSON *request, cJSON *log);
+/**
+ * @brief Handle the Thread network formation @param request and provide @param log
+ *
+ * @param [in] request  A cJSON format from http request for forming network.
+ * @param [out] log     A cJSON String type to record the result of network formation.
+ *
+ * @return
+ *      -   OT_ERROR_NONE           :   On success.
+ *      -   OT_ERROR_INVALID_ARGS   :   The @param request or @param log is invalid.
+ *      -   OT_ERROR_INVALID_STATE  :   The network interface was not not up.
+ *      -   OT_ERROR_NO_BUFS        :   Insufficient buffer space to set the Active Operational Dataset.
+ *      -   OT_ERROR_NOT_IMPLEMENTED:   The platform does not implement settings functionality.
+ *      -   OT_ERROR_FAILED         :   Failed to form network.
+ */
+otError handle_openthread_form_network_request(const cJSON *request, cJSON *log);
 
-    /**
-     * @brief Handle the Thread network join @param request and provide @param log
-     *
-     * @param[in] request   A cJSON format from the request of http.
-     * @param[out] log      A cJSON string type to record the result of joining network.
-     *
-     * @return
-     *      -   OT_ERROR_NONE           :   On success.
-     *      -   OT_ERROR_INVALID_ARGS   :   The @param request or @param log is invalid.
-     *      -   OT_ERROR_INVALID_STATE  :   The network interface was not not up.
-     *      -   OT_ERROR_NO_BUFS        :   Insufficient buffer space to set the Active Operational Dataset.
-     *      -   OT_ERROR_NOT_IMPLEMENTED:   The platform does not implement settings functionality.
-     *      -   OT_ERROR_FAILED         :   Failed to join network.
-     */
-    otError handle_openthread_join_network_request(const cJSON *request, cJSON *log);
+/**
+ * @brief Handle the Thread network join @param request and provide @param log
+ *
+ * @param[in] request   A cJSON format from the request of http.
+ * @param[out] log      A cJSON string type to record the result of joining network.
+ *
+ * @return
+ *      -   OT_ERROR_NONE           :   On success.
+ *      -   OT_ERROR_INVALID_ARGS   :   The @param request or @param log is invalid.
+ *      -   OT_ERROR_INVALID_STATE  :   The network interface was not not up.
+ *      -   OT_ERROR_NO_BUFS        :   Insufficient buffer space to set the Active Operational Dataset.
+ *      -   OT_ERROR_NOT_IMPLEMENTED:   The platform does not implement settings functionality.
+ *      -   OT_ERROR_FAILED         :   Failed to join network.
+ */
+otError handle_openthread_join_network_request(const cJSON *request, cJSON *log);
 
-    /**
-     * @brief Add prefix to Thread Network interface.
-     *
-     * @param[in] request   The prefix cJSON format from http.
-     * @return
-     *      -   OT_ERROR_NONE           :   On success.
-     *      -   OT_ERROR_INVALID_ARGS   :   Invalid @param request.
-     *      -   OT_ERROR_NOT_FOUND      :   Could not find the Border Router entry.
-     */
-    otError handle_openthread_add_network_prefix_request(const cJSON *request);
+/**
+ * @brief Add prefix to Thread Network interface.
+ *
+ * @param[in] request   The prefix cJSON format from http.
+ * @return
+ *      -   OT_ERROR_NONE           :   On success.
+ *      -   OT_ERROR_INVALID_ARGS   :   Invalid @param request.
+ *      -   OT_ERROR_NOT_FOUND      :   Could not find the Border Router entry.
+ */
+otError handle_openthread_add_network_prefix_request(const cJSON *request);
 
-    /**
-     * @brief Delete prefix from Thread Network interface.
-     *
-     * @param[in] request   The request from http.
-     * @return
-     *      -   OT_ERROR_NONE           :   On success.
-     *      -   OT_ERROR_INVALID_ARGS   :   Invalid @param request.
-     *      -   OT_ERROR_NOT_FOUND      :   Could not find the Border Router entry.
-     */
-    otError handle_openthread_delete_network_prefix_request(const cJSON *request);
+/**
+ * @brief Delete prefix from Thread Network interface.
+ *
+ * @param[in] request   The request from http.
+ * @return
+ *      -   OT_ERROR_NONE           :   On success.
+ *      -   OT_ERROR_INVALID_ARGS   :   Invalid @param request.
+ *      -   OT_ERROR_NOT_FOUND      :   Could not find the Border Router entry.
+ */
+otError handle_openthread_delete_network_prefix_request(const cJSON *request);
 
-    /**
-     * @brief Commission Thread network by @param request.
-     *
-     * @param[in] request   The request from http
-     * @return
-     *      -   OT_ERROR_NONE           :   Successfully started the Commissioner service.
-     *      -   OT_ERROR_ALREADY        :   Commissioner is already started.
-     *      -   OT_ERROR_INVALID_STATE  :   Device is not currently attached to a network.
-     *      -   OT_ERROR_NO_BUFS        :   No buffers available to add the Joiner.
-     *      -   OT_ERROR_INVALID_ARGS   :   @p aDiscerner or @p aPskd is invalid.
-     *      -   OT_ERROR_INVALID_STATE  :   The commissioner is not active.
-     */
-    otError handle_openthread_network_commission_request(const cJSON *request);
+/**
+ * @brief Commission Thread network by @param request.
+ *
+ * @param[in] request   The request from http
+ * @return
+ *      -   OT_ERROR_NONE           :   Successfully started the Commissioner service.
+ *      -   OT_ERROR_ALREADY        :   Commissioner is already started.
+ *      -   OT_ERROR_INVALID_STATE  :   Device is not currently attached to a network.
+ *      -   OT_ERROR_NO_BUFS        :   No buffers available to add the Joiner.
+ *      -   OT_ERROR_INVALID_ARGS   :   @p aDiscerner or @p aPskd is invalid.
+ *      -   OT_ERROR_INVALID_STATE  :   The commissioner is not active.
+ */
+otError handle_openthread_network_commission_request(const cJSON *request);
 
-    /**
-     * @brief Provide an entry to discover Thread available network.
-     *
-     * @return the cJSON format of the available Thread networks.
-     */
-    cJSON *handle_openthread_available_network_request(void);
+/**
+ * @brief Provide an entry to discover Thread available network.
+ *
+ * @return the cJSON format of the available Thread networks.
+ */
+cJSON *handle_openthread_available_network_request(void);
 
-    /**
-     * @brief Provides an entry to obtain and pack the openthread properties.
-     *
-     * @return The cJSON Object type of Thread network properties.
-     */
-    cJSON *handle_openthread_network_properties_request(void);
+/**
+ * @brief Provides an entry to obtain and pack the openthread properties.
+ *
+ * @return The cJSON Object type of Thread network properties.
+ */
+cJSON *handle_openthread_network_properties_request(void);
 
-    /**
-     * @brief Handle a ping request to an IPv6 address using the OpenThread ping sender.
-     *
-     * @param[in] request   A cJSON object containing "address" (IPv6 string), and optionally
-     *                      "size" (payload bytes, default 32) and "count" (number of pings, default 4).
-     *
-     * @return A cJSON object with "replies" array and "statistics" summary, or NULL on failure.
-     */
-    cJSON *handle_openthread_ping_request(const cJSON *request);
+/**
+ * @brief Handle a ping request to an IPv6 address using the OpenThread ping sender.
+ *
+ * @param[in] request   A cJSON object containing "address" (IPv6 string), and optionally
+ *                      "size" (payload bytes, default 32) and "count" (number of pings, default 4).
+ *
+ * @return A cJSON object with "replies" array and "statistics" summary, or NULL on failure.
+ */
+cJSON *handle_openthread_ping_request(const cJSON *request);
 
-    /**
-     * @brief List all unicast IPv6 addresses on the Thread interface.
-     *
-     * @return A cJSON array of address objects, or NULL on failure.
-     */
-    cJSON *handle_openthread_ipaddr_list_request(void);
+/**
+ * @brief List all unicast IPv6 addresses on the Thread interface.
+ *
+ * @return A cJSON array of address objects, or NULL on failure.
+ */
+cJSON *handle_openthread_ipaddr_list_request(void);
 
-    /**
-     * @brief Add a unicast IPv6 address to the Thread interface.
-     *
-     * @param[in] request   A cJSON object containing "address" (IPv6 string).
-     * @return A cJSON object with status, or NULL on failure.
-     */
-    cJSON *handle_openthread_add_ipaddr_request(const cJSON *request);
+/**
+ * @brief Add a unicast IPv6 address to the Thread interface.
+ *
+ * @param[in] request   A cJSON object containing "address" (IPv6 string).
+ * @return A cJSON object with status, or NULL on failure.
+ */
+cJSON *handle_openthread_add_ipaddr_request(const cJSON *request);
 
-    /**
-     * @brief Remove a unicast IPv6 address from the Thread interface.
-     *
-     * @param[in] request   A cJSON object containing "address" (IPv6 string).
-     * @return A cJSON object with status, or NULL on failure.
-     */
-    cJSON *handle_openthread_delete_ipaddr_request(const cJSON *request);
+/**
+ * @brief Remove a unicast IPv6 address from the Thread interface.
+ *
+ * @param[in] request   A cJSON object containing "address" (IPv6 string).
+ * @return A cJSON object with status, or NULL on failure.
+ */
+cJSON *handle_openthread_delete_ipaddr_request(const cJSON *request);
 
-    /**
-     * @brief Get the local Thread leader weight used during leader election.
-     *
-     * @return The current leader weight value (0-255).
-     */
-    uint8_t handle_ot_leader_weight_get_request(void);
+/**
+ * @brief Get the local Thread leader weight used during leader election.
+ *
+ * @return The current leader weight value (0-255).
+ */
+uint8_t handle_ot_leader_weight_get_request(void);
 
-    /**
-     * @brief Set the local Thread leader weight used during leader election.
-     *
-     * @param[in] weight    New leader weight value (0-255).
-     */
-    void handle_ot_leader_weight_put_request(uint8_t weight);
+/**
+ * @brief Set the local Thread leader weight used during leader election.
+ *
+ * @param[in] weight    New leader weight value (0-255).
+ */
+void handle_ot_leader_weight_put_request(uint8_t weight);
 
-    /**
-     * @brief Request the device to become the Thread leader of its current partition.
-     *
-     * @return
-     *      -   OT_ERROR_NONE           :   On success.
-     *      -   OT_ERROR_NOT_CAPABLE    :   Current weight is not higher than the leader's weight.
-     *      -   OT_ERROR_INVALID_STATE  :   Device is not attached as a router.
-     */
-    otError handle_ot_become_leader_request(void);
+/**
+ * @brief Request the device to become the Thread leader of its current partition.
+ *
+ * @return
+ *      -   OT_ERROR_NONE           :   On success.
+ *      -   OT_ERROR_NOT_CAPABLE    :   Current weight is not higher than the leader's weight.
+ *      -   OT_ERROR_INVALID_STATE  :   Device is not attached as a router.
+ */
+otError handle_ot_become_leader_request(void);
 
 #ifdef __cplusplus
 }

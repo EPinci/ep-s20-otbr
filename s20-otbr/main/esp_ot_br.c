@@ -1,8 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Apache-2.0
- */
 #include <stdio.h>
 #include <string.h>
 
@@ -10,9 +5,9 @@
 
 #include "esp_check.h"
 #include "esp_err.h"
+#include "esp_eth.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "esp_eth.h"
 #include "esp_netif.h"
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
@@ -69,21 +64,19 @@ static esp_err_t init_spiffs(void)
 // #endif /* CONFIG_EXTERNAL_COEX_ENABLE */
 
 /** Event handler for Ethernet events */
-static void eth_event_handler(void *arg, esp_event_base_t event_base,
-                              int32_t event_id, void *event_data)
+static void eth_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     uint8_t mac_addr[6] = {0};
     /* we can get the ethernet driver handle from event data */
     esp_eth_handle_t eth_handle = *(esp_eth_handle_t *)event_data;
 
-    switch (event_id)
-    {
+    switch (event_id) {
     case ETHERNET_EVENT_CONNECTED:
         set_nwk_led_color(false, true, false);
         esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
         ESP_LOGI(TAG, "Ethernet Link Up");
-        ESP_LOGI(TAG, "Ethernet HW Addr %02x:%02x:%02x:%02x:%02x:%02x",
-                 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+        ESP_LOGI(TAG, "Ethernet HW Addr %02x:%02x:%02x:%02x:%02x:%02x", mac_addr[0], mac_addr[1], mac_addr[2],
+                 mac_addr[3], mac_addr[4], mac_addr[5]);
         break;
     case ETHERNET_EVENT_DISCONNECTED:
         set_nwk_led_color(false, false, false);
@@ -101,8 +94,7 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
 }
 
 /** Event handler for IP_EVENT_ETH_GOT_IP */
-static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
-                                 int32_t event_id, void *event_data)
+static void got_ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
     const esp_netif_ip_info_t *ip_info = &event->ip_info;
@@ -118,27 +110,17 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
 static void thread_event_handler(void *esp_netif, esp_event_base_t event_base, int32_t event_id, void *data)
 {
     ESP_LOGD(TAG, "===========esp_netif action has started with netif%p from event_id=%" PRId32, esp_netif, event_id);
-    if (event_id == OPENTHREAD_EVENT_START)
-    {
+    if (event_id == OPENTHREAD_EVENT_START) {
         ESP_LOGI(TAG, "======OPENTHREAD_EVENT_START======");
-    }
-    else if (event_id == OPENTHREAD_EVENT_ATTACHED)
-    {
+    } else if (event_id == OPENTHREAD_EVENT_ATTACHED) {
         ESP_LOGI(TAG, "======OPENTHREAD_EVENT_ATTACHED======");
-    }
-    else if (event_id == OPENTHREAD_EVENT_ROLE_CHANGED)
-    {
+    } else if (event_id == OPENTHREAD_EVENT_ROLE_CHANGED) {
         int role = otThreadGetDeviceRole(esp_openthread_get_instance());
-        if (role == OT_DEVICE_ROLE_DISABLED)
-        {
+        if (role == OT_DEVICE_ROLE_DISABLED) {
             set_mesh_led_color(false, false, false);
-        }
-        else if (role == OT_DEVICE_ROLE_DETACHED)
-        {
+        } else if (role == OT_DEVICE_ROLE_DETACHED) {
             set_mesh_led_color(false, false, true);
-        }
-        else
-        {
+        } else {
             set_mesh_led_color(false, true, false);
         }
         ESP_LOGI(TAG, "======OPENTHREAD_EVENT_ROLE_CHANGED======%s", otThreadDeviceRoleToString(role));
@@ -167,11 +149,12 @@ void app_main(void)
 
     esp_openthread_config_t openthread_config = {
         .netif_config = ESP_NETIF_DEFAULT_OPENTHREAD(),
-        .platform_config = {
-            .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
-            .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
-            .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
-        },
+        .platform_config =
+            {
+                .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
+                .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
+                .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
+            },
     };
     esp_rcp_update_config_t rcp_update_config = ESP_OPENTHREAD_RCP_UPDATE_CONFIG();
     ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_config));

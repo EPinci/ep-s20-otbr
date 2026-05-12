@@ -1,11 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Apache-2.0
- *
- * Wi-Fi Configuration and SoftAP support for ESP Thread Border Router
- */
-
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>

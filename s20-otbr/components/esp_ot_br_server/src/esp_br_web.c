@@ -1,16 +1,10 @@
-/*
- * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #include <limits.h>
-#include <strings.h>
-#include <stdlib.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "sdkconfig.h"
 
@@ -28,24 +22,24 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include "esp_ota_ops.h"
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
 #include "esp_ot_ota_commands.h"
+#include "esp_ota_ops.h"
 #include "esp_rcp_firmware.h"
 #include "esp_rcp_ota.h"
 #include "esp_spiffs.h"
 #include "esp_system.h"
 #include "esp_vfs.h"
+#include "http_parser.h"
+#include "protocol_examples_common.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "http_parser.h"
-#include "protocol_examples_common.h"
 
-#include "mbedtls/base64.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "mbedtls/base64.h"
 
 #include "openthread/dataset.h"
 #include "openthread/error.h"
@@ -79,8 +73,7 @@ extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
 /**
  * @brief The basic configuration for http_server
  */
-typedef struct http_server_data
-{
+typedef struct http_server_data {
     char base_path[ESP_VFS_PATH_MAX + 1]; /* the storaged file path */
     char scratch[SCRATCH_BUFSIZE];        /* scratch buffer for temporary storage during file transfer */
 } http_server_data_t;
@@ -88,8 +81,7 @@ typedef struct http_server_data
 /**
  * @brief The basic information for http_server
  */
-typedef struct http_server
-{
+typedef struct http_server {
     httpd_handle_t handle;    /* server handle, unique */
     http_server_data_t data;  /* data */
     char ip[SERVER_IPV4_LEN]; /* ip */
@@ -106,8 +98,7 @@ static uint64_t s_log_write_cursor;
 static char s_log_buffer[LOG_BUFFER_SIZE];
 static vprintf_like_t s_log_vprintf;
 
-typedef struct ota_request_context
-{
+typedef struct ota_request_context {
     char *url;
 } ota_request_context_t;
 
@@ -117,8 +108,7 @@ typedef struct ota_request_context
 #define PROTLOCOL_MAX_SIZE 12
 #define FILENAME_MAX_SIZE 64
 #define FILEPATH_MAX_SIZE (FILENAME_MAX_SIZE + ESP_VFS_PATH_MAX)
-typedef struct request_url
-{
+typedef struct request_url {
     char protocol[PROTLOCOL_MAX_SIZE];
     uint16_t port;
     char file_name[FILENAME_MAX_SIZE];
@@ -451,18 +441,14 @@ static httpd_uri_t s_web_gui_handlers[] = {
 -----------------------------------------------------*/
 static cJSON *pack_response(cJSON *error, cJSON *result, cJSON *message)
 {
-    if (!error || !result || !message)
-    {
-        if (error)
-        {
+    if (!error || !result || !message) {
+        if (error) {
             cJSON_Delete(error);
         }
-        if (result)
-        {
+        if (result) {
             cJSON_Delete(result);
         }
-        if (message)
-        {
+        if (message) {
             cJSON_Delete(message);
         }
         ESP_LOGE(WEB_TAG, "Failed to pack response json");
@@ -486,8 +472,7 @@ static cJSON *resource_status(char *error, char *msg)
 static esp_err_t httpd_server_register_http_uri(const http_server_t *server, httpd_uri_t *uris, uint8_t size)
 {
     ESP_RETURN_ON_FALSE((server->handle && uris), ESP_ERR_INVALID_ARG, WEB_TAG, "Invalid argument");
-    for (int i = 0; i < size; i++)
-    {
+    for (int i = 0; i < size; i++) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server->handle, &uris[i]), WEB_TAG,
                             "Failed to register %s for %d", uris[i].uri, i);
     }
@@ -501,8 +486,7 @@ static cJSON *httpd_request_convert2_json(httpd_req_t *req, int type)
     int cur_len = 0;
     int total_len = req->content_len;
     int end_len = total_len;
-    if (type == cJSON_String)
-    {
+    if (type == cJSON_String) {
         cur_len = 1;
         total_len += 2;
         buf[0] = '\"';
@@ -515,8 +499,7 @@ static cJSON *httpd_request_convert2_json(httpd_req_t *req, int type)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "The content of packet is too long");
         return NULL;
     }
-    while (cur_len < end_len)
-    {
+    while (cur_len < end_len) {
         received = httpd_req_recv(req, buf + cur_len, total_len);
         if (received <= 0) /* Respond with 500 Internal Server Error */
         {
@@ -560,14 +543,12 @@ exit:
 
 static void log_buffer_write(const char *text, size_t len)
 {
-    if (!text || len == 0)
-    {
+    if (!text || len == 0) {
         return;
     }
 
     taskENTER_CRITICAL(&s_log_buffer_lock);
-    for (size_t index = 0; index < len; ++index)
-    {
+    for (size_t index = 0; index < len; ++index) {
         s_log_buffer[s_log_write_cursor % LOG_BUFFER_SIZE] = text[index];
         ++s_log_write_cursor;
     }
@@ -581,8 +562,7 @@ static int web_log_vprintf(const char *fmt, va_list args)
     va_list size_args;
 
     va_copy(print_args, args);
-    if (s_log_vprintf)
-    {
+    if (s_log_vprintf) {
         ret = s_log_vprintf(fmt, print_args);
     }
     va_end(print_args);
@@ -591,13 +571,11 @@ static int web_log_vprintf(const char *fmt, va_list args)
     int needed = vsnprintf(NULL, 0, fmt, size_args);
     va_end(size_args);
 
-    if (needed <= 0)
-    {
+    if (needed <= 0) {
         return ret;
     }
 
-    if (needed < 256)
-    {
+    if (needed < 256) {
         char stack_buf[256];
         va_list write_args;
 
@@ -609,8 +587,7 @@ static int web_log_vprintf(const char *fmt, va_list args)
     }
 
     char *heap_buf = malloc((size_t)needed + 1);
-    if (!heap_buf)
-    {
+    if (!heap_buf) {
         return ret;
     }
 
@@ -625,8 +602,7 @@ static int web_log_vprintf(const char *fmt, va_list args)
 
 static void ensure_log_hook_installed(void)
 {
-    if (s_log_hook_installed)
-    {
+    if (s_log_hook_installed) {
         return;
     }
 
@@ -660,8 +636,7 @@ static esp_err_t copy_log_buffer_since(uint64_t requested_cursor, char **out_tex
     ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate log snapshot");
 
     taskENTER_CRITICAL(&s_log_buffer_lock);
-    for (size_t index = 0; index < *out_len; ++index)
-    {
+    for (size_t index = 0; index < *out_len; ++index) {
         buffer[index] = s_log_buffer[(start_cursor + index) % LOG_BUFFER_SIZE];
     }
     taskEXIT_CRITICAL(&s_log_buffer_lock);
@@ -677,21 +652,17 @@ static uint64_t parse_log_cursor(httpd_req_t *req)
     char cursor_value[LOG_QUERY_VALUE_LEN];
     size_t last_event_id_len = httpd_req_get_hdr_value_len(req, "Last-Event-ID");
 
-    if (last_event_id_len > 0 && last_event_id_len < sizeof(cursor_value))
-    {
-        if (httpd_req_get_hdr_value_str(req, "Last-Event-ID", cursor_value, sizeof(cursor_value)) == ESP_OK)
-        {
+    if (last_event_id_len > 0 && last_event_id_len < sizeof(cursor_value)) {
+        if (httpd_req_get_hdr_value_str(req, "Last-Event-ID", cursor_value, sizeof(cursor_value)) == ESP_OK) {
             return strtoull(cursor_value, NULL, 10);
         }
     }
 
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK)
-    {
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
         return 0;
     }
 
-    if (httpd_query_key_value(query, "cursor", cursor_value, sizeof(cursor_value)) != ESP_OK)
-    {
+    if (httpd_query_key_value(query, "cursor", cursor_value, sizeof(cursor_value)) != ESP_OK) {
         return 0;
     }
 
@@ -707,8 +678,7 @@ static esp_err_t httpd_send_sse_event(httpd_req_t *req, const char *event_name, 
     const char *newline = NULL;
     const char *line_end = NULL;
 
-    if (event_name && event_name[0] != '\0')
-    {
+    if (event_name && event_name[0] != '\0') {
         snprintf(header, sizeof(header), "event: %s\n", event_name);
         ESP_RETURN_ON_ERROR(httpd_resp_sendstr_chunk(req, header), WEB_TAG, "Failed to send SSE event name");
     }
@@ -716,21 +686,18 @@ static esp_err_t httpd_send_sse_event(httpd_req_t *req, const char *event_name, 
     snprintf(header, sizeof(header), "id: %llu\n", (unsigned long long)cursor);
     ESP_RETURN_ON_ERROR(httpd_resp_sendstr_chunk(req, header), WEB_TAG, "Failed to send SSE event id");
 
-    while (1)
-    {
+    while (1) {
         newline = strchr(line_start, '\n');
         line_end = newline ? newline : line_start + strlen(line_start);
 
         ESP_RETURN_ON_ERROR(httpd_resp_sendstr_chunk(req, "data:"), WEB_TAG, "Failed to send SSE prefix");
-        if (line_end > line_start)
-        {
+        if (line_end > line_start) {
             ESP_RETURN_ON_ERROR(httpd_resp_sendstr_chunk(req, " "), WEB_TAG, "Failed to send SSE separator");
             ret = httpd_resp_send_chunk(req, line_start, (ssize_t)(line_end - line_start));
             ESP_RETURN_ON_ERROR(ret, WEB_TAG, "Failed to send SSE line");
         }
 
-        if (newline)
-        {
+        if (newline) {
             ESP_RETURN_ON_ERROR(httpd_resp_sendstr_chunk(req, "\n"), WEB_TAG, "Failed to terminate SSE line");
             line_start = newline + 1;
             continue;
@@ -749,13 +716,11 @@ static bool httpd_sse_stream_closed(esp_err_t err)
 static cJSON *create_ota_result(const char *status, const char *url)
 {
     cJSON *result = cJSON_CreateObject();
-    if (!result)
-    {
+    if (!result) {
         return NULL;
     }
     cJSON_AddStringToObject(result, "status", status ? status : "unknown");
-    if (url)
-    {
+    if (url) {
         cJSON_AddStringToObject(result, "url", url);
     }
     return result;
@@ -765,19 +730,16 @@ static bool ota_url_is_valid(const char *url)
 {
     size_t url_len = 0;
 
-    if (!url)
-    {
+    if (!url) {
         return false;
     }
 
     url_len = strlen(url);
-    if (url_len == 0 || url_len >= OTA_URL_MAX_LEN)
-    {
+    if (url_len == 0 || url_len >= OTA_URL_MAX_LEN) {
         return false;
     }
 
-    return strncmp(url, "http://", strlen("http://")) == 0 ||
-           strncmp(url, "https://", strlen("https://")) == 0;
+    return strncmp(url, "http://", strlen("http://")) == 0 || strncmp(url, "https://", strlen("https://")) == 0;
 }
 
 static bool ota_upload_content_type_is_valid(httpd_req_t *req)
@@ -786,19 +748,16 @@ static bool ota_upload_content_type_is_valid(httpd_req_t *req)
     char *content_type = NULL;
     bool valid = true;
 
-    if (header_len == 0)
-    {
+    if (header_len == 0) {
         return true;
     }
 
     content_type = calloc(header_len + 1, sizeof(char));
-    if (!content_type)
-    {
+    if (!content_type) {
         return false;
     }
 
-    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, header_len + 1) != ESP_OK)
-    {
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, header_len + 1) != ESP_OK) {
         free(content_type);
         return false;
     }
@@ -812,18 +771,15 @@ static bool ota_try_acquire_slot(void)
 {
     bool acquired = false;
 
-    if (!s_ota_mutex)
-    {
+    if (!s_ota_mutex) {
         return false;
     }
 
-    if (xSemaphoreTake(s_ota_mutex, portMAX_DELAY) != pdTRUE)
-    {
+    if (xSemaphoreTake(s_ota_mutex, portMAX_DELAY) != pdTRUE) {
         return false;
     }
 
-    if (!s_ota_in_progress)
-    {
+    if (!s_ota_in_progress) {
         s_ota_in_progress = true;
         acquired = true;
     }
@@ -834,13 +790,11 @@ static bool ota_try_acquire_slot(void)
 
 static void ota_release_slot(void)
 {
-    if (!s_ota_mutex)
-    {
+    if (!s_ota_mutex) {
         return;
     }
 
-    if (xSemaphoreTake(s_ota_mutex, portMAX_DELAY) == pdTRUE)
-    {
+    if (xSemaphoreTake(s_ota_mutex, portMAX_DELAY) == pdTRUE) {
         s_ota_in_progress = false;
         xSemaphoreGive(s_ota_mutex);
     }
@@ -858,21 +812,17 @@ static void ota_update_task(void *ctx)
     };
     esp_err_t err = esp_br_http_ota(&http_config);
 
-    if (err != ESP_OK)
-    {
+    if (err != ESP_OK) {
         ESP_LOGE(WEB_TAG, "OTA update failed for %s: %s", request->url, esp_err_to_name(err));
         ota_release_slot();
-    }
-    else
-    {
+    } else {
         ESP_LOGI(WEB_TAG, "OTA image accepted from %s, restarting", request->url);
     }
 
     free(request->url);
     free(request);
 
-    if (err == ESP_OK)
-    {
+    if (err == ESP_OK) {
         esp_restart();
     }
 
@@ -912,29 +862,25 @@ static esp_err_t ota_receive_uploaded_image(httpd_req_t *req)
     ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate OTA upload buffer");
     ESP_GOTO_ON_ERROR(esp_rcp_ota_begin(&rcp_ota_handle), exit, WEB_TAG, "Failed to begin RCP OTA");
 
-    while (remaining_len > 0)
-    {
+    while (remaining_len > 0) {
         size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
         int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
         size_t host_data_offset = 0;
         size_t host_data_len = 0;
 
-        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
-        {
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
             continue;
         }
         ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive OTA upload body");
         remaining_len -= recv_len;
 
-        if (esp_rcp_ota_get_state(rcp_ota_handle) != ESP_RCP_OTA_STATE_FINISHED)
-        {
+        if (esp_rcp_ota_get_state(rcp_ota_handle) != ESP_RCP_OTA_STATE_FINISHED) {
             size_t rcp_received_len = 0;
             ESP_GOTO_ON_ERROR(esp_rcp_ota_receive(rcp_ota_handle, buffer, recv_len, &rcp_received_len), exit, WEB_TAG,
                               "Failed to receive uploaded RCP OTA data");
             host_data_offset = rcp_received_len;
 
-            if (esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED)
-            {
+            if (esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED) {
                 host_fw_size = esp_rcp_ota_get_subfile_size(rcp_ota_handle, FILETAG_HOST_FIRMWARE);
                 ESP_GOTO_ON_FALSE(host_fw_size > 0, ESP_ERR_INVALID_ARG, exit, WEB_TAG,
                                   "Uploaded OTA image does not contain host firmware");
@@ -945,11 +891,9 @@ static esp_err_t ota_receive_uploaded_image(httpd_req_t *req)
             }
         }
 
-        if (esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED)
-        {
+        if (esp_rcp_ota_get_state(rcp_ota_handle) == ESP_RCP_OTA_STATE_FINISHED) {
             host_data_len = recv_len - host_data_offset;
-            if (host_data_len > 0)
-            {
+            if (host_data_len > 0) {
                 ESP_GOTO_ON_FALSE(host_update_started, ESP_ERR_INVALID_STATE, exit, WEB_TAG,
                                   "Host OTA started before host partition was prepared");
                 ESP_GOTO_ON_FALSE(host_fw_downloaded + host_data_len <= host_fw_size, ESP_ERR_INVALID_SIZE, exit,
@@ -975,20 +919,17 @@ static esp_err_t ota_receive_uploaded_image(httpd_req_t *req)
                       "Failed to set uploaded OTA boot partition");
 
     ret = esp_rcp_ota_end(rcp_ota_handle);
-    if (ret != ESP_OK)
-    {
+    if (ret != ESP_OK) {
         esp_ota_set_boot_partition(esp_ota_get_next_update_partition(NULL));
     }
     rcp_ota_handle = 0;
 
 exit:
     free(buffer);
-    if (ret != ESP_OK && host_ota_handle)
-    {
+    if (ret != ESP_OK && host_ota_handle) {
         esp_ota_abort(host_ota_handle);
     }
-    if (ret != ESP_OK && rcp_ota_handle)
-    {
+    if (ret != ESP_OK && rcp_ota_handle) {
         esp_rcp_ota_abort(rcp_ota_handle);
     }
     return ret;
@@ -1006,32 +947,32 @@ static esp_err_t ota_receive_app_image(httpd_req_t *req)
 
     buffer = malloc(FILE_CHUNK_SIZE);
     ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate app OTA upload buffer");
-    ESP_GOTO_ON_ERROR(ota_begin_host_update(&host_ota_handle, &update_partition), exit, WEB_TAG, "Failed to begin app OTA");
+    ESP_GOTO_ON_ERROR(ota_begin_host_update(&host_ota_handle, &update_partition), exit, WEB_TAG,
+                      "Failed to begin app OTA");
 
-    while (remaining_len > 0)
-    {
+    while (remaining_len > 0) {
         size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
         int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
 
-        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
-        {
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
             continue;
         }
         ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive app OTA upload body");
         remaining_len -= recv_len;
 
-        ESP_GOTO_ON_ERROR(esp_ota_write(host_ota_handle, buffer, recv_len), exit, WEB_TAG, "Failed to write app OTA data");
+        ESP_GOTO_ON_ERROR(esp_ota_write(host_ota_handle, buffer, recv_len), exit, WEB_TAG,
+                          "Failed to write app OTA data");
     }
 
     ret = esp_ota_end(host_ota_handle);
     host_ota_handle = 0;
     ESP_GOTO_ON_ERROR(ret, exit, WEB_TAG, "Failed to finalize app OTA");
-    ESP_GOTO_ON_ERROR(esp_ota_set_boot_partition(update_partition), exit, WEB_TAG, "Failed to set app OTA boot partition");
+    ESP_GOTO_ON_ERROR(esp_ota_set_boot_partition(update_partition), exit, WEB_TAG,
+                      "Failed to set app OTA boot partition");
 
 exit:
     free(buffer);
-    if (ret != ESP_OK && host_ota_handle)
-    {
+    if (ret != ESP_OK && host_ota_handle) {
         esp_ota_abort(host_ota_handle);
     }
     return ret;
@@ -1050,20 +991,17 @@ static esp_err_t ota_receive_rcp_image(httpd_req_t *req)
     ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate RCP OTA upload buffer");
     ESP_GOTO_ON_ERROR(esp_rcp_ota_begin(&rcp_ota_handle), exit, WEB_TAG, "Failed to begin RCP OTA");
 
-    while (remaining_len > 0)
-    {
+    while (remaining_len > 0) {
         size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
         int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
 
-        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
-        {
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
             continue;
         }
         ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive RCP OTA upload body");
         remaining_len -= recv_len;
 
-        if (esp_rcp_ota_get_state(rcp_ota_handle) != ESP_RCP_OTA_STATE_FINISHED)
-        {
+        if (esp_rcp_ota_get_state(rcp_ota_handle) != ESP_RCP_OTA_STATE_FINISHED) {
             size_t rcp_received_len = 0;
             ESP_GOTO_ON_ERROR(esp_rcp_ota_receive(rcp_ota_handle, buffer, recv_len, &rcp_received_len), exit, WEB_TAG,
                               "Failed to receive uploaded RCP OTA data");
@@ -1079,8 +1017,7 @@ static esp_err_t ota_receive_rcp_image(httpd_req_t *req)
 
 exit:
     free(buffer);
-    if (ret != ESP_OK && rcp_ota_handle)
-    {
+    if (ret != ESP_OK && rcp_ota_handle) {
         esp_rcp_ota_abort(rcp_ota_handle);
     }
     return ret;
@@ -1093,32 +1030,29 @@ static esp_err_t ota_receive_web_image(httpd_req_t *req)
     size_t remaining_len = req->content_len;
     size_t written = 0;
 
-    const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
-                                                                ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "web_storage");
+    const esp_partition_t *partition =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "web_storage");
     ESP_RETURN_ON_FALSE(partition != NULL, ESP_ERR_NOT_FOUND, WEB_TAG, "Failed to find web_storage partition");
     ESP_RETURN_ON_FALSE(remaining_len == (size_t)partition->size, ESP_ERR_INVALID_SIZE, WEB_TAG,
-                        "Uploaded web image size (%zu) does not match partition size (%u)",
-                        remaining_len, (unsigned)partition->size);
+                        "Uploaded web image size (%zu) does not match partition size (%u)", remaining_len,
+                        (unsigned)partition->size);
 
     buffer = malloc(FILE_CHUNK_SIZE);
     ESP_RETURN_ON_FALSE(buffer, ESP_ERR_NO_MEM, WEB_TAG, "Failed to allocate web OTA upload buffer");
 
     esp_err_t unregister_ret = esp_vfs_spiffs_unregister("web_storage");
-    if (unregister_ret != ESP_OK)
-    {
+    if (unregister_ret != ESP_OK) {
         ESP_LOGW(WEB_TAG, "Could not unmount web_storage before write: %s", esp_err_to_name(unregister_ret));
     }
 
     ESP_GOTO_ON_ERROR(esp_partition_erase_range(partition, 0, partition->size), exit, WEB_TAG,
                       "Failed to erase web_storage partition");
 
-    while (remaining_len > 0)
-    {
+    while (remaining_len > 0) {
         size_t chunk_size = remaining_len < FILE_CHUNK_SIZE ? remaining_len : FILE_CHUNK_SIZE;
         int recv_len = httpd_req_recv(req, (char *)buffer, chunk_size);
 
-        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
-        {
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
             continue;
         }
         ESP_GOTO_ON_FALSE(recv_len > 0, ESP_FAIL, exit, WEB_TAG, "Failed to receive web OTA upload body");
@@ -1164,15 +1098,12 @@ static esp_err_t esp_otbr_network_diagnostics_get_handler(httpd_req_t *req)
     int array_size = cJSON_GetArraySize(response);
     ESP_GOTO_ON_ERROR(httpd_resp_sendstr_chunk(req, "["), exit, WEB_TAG, "Failed to send chunk");
 
-    for (int i = 0; i < array_size; i++)
-    {
+    for (int i = 0; i < array_size; i++) {
         cJSON *detached = cJSON_DetachItemFromArray(response, 0);
         char *chunk = cJSON_PrintUnformatted(detached);
         cJSON_Delete(detached);
-        if (chunk)
-        {
-            if (i > 0)
-            {
+        if (chunk) {
+            if (i > 0) {
                 ESP_GOTO_ON_ERROR(httpd_resp_sendstr_chunk(req, ","), exit, WEB_TAG, "Failed to send chunk");
             }
             esp_err_t send_err = httpd_resp_sendstr_chunk(req, chunk);
@@ -1207,16 +1138,11 @@ static esp_err_t esp_otbr_network_node_delete_handler(httpd_req_t *req)
     ESP_RETURN_ON_FALSE(req, ESP_FAIL, WEB_TAG, "Failed to parse the node information of http request");
     esp_err_t ret = ESP_OK;
     otError error = handle_ot_resource_node_delete_information_request();
-    if (error == OT_ERROR_NONE)
-    {
+    if (error == OT_ERROR_NONE) {
         httpd_resp_set_status(req, HTTPD_200);
-    }
-    else if (error == OT_ERROR_INVALID_STATE)
-    {
+    } else if (error == OT_ERROR_INVALID_STATE) {
         httpd_resp_set_status(req, HTTPD_409);
-    }
-    else
-    {
+    } else {
         httpd_resp_set_status(req, HTTPD_500);
     }
     ESP_GOTO_ON_ERROR(httpd_resp_send(req, NULL, 0), exit, WEB_TAG, "Failed to response %s", req->uri);
@@ -1259,19 +1185,15 @@ static esp_err_t esp_otbr_network_node_state_put_handler(httpd_req_t *req)
     esp_err_t ret = ESP_OK;
     otError err = OT_ERROR_NONE;
     cJSON *state = httpd_request_convert2_json(req, cJSON_Object);
-    if (cJSON_IsString(state))
-    {
+    if (cJSON_IsString(state)) {
         err = handle_ot_resource_node_state_put_request(state);
-    }
-    else
-    {
+    } else {
         ESP_LOGE(WEB_TAG, "Invalid args");
         err = OT_ERROR_INVALID_ARGS;
     }
 
     char http_return_status[64];
-    if (convert_ot_err_to_response_code(err, http_return_status) != ESP_OK)
-    {
+    if (convert_ot_err_to_response_code(err, http_return_status) != ESP_OK) {
         strcpy(http_return_status, HTTPD_500);
     }
     httpd_resp_set_status(req, http_return_status);
@@ -1361,80 +1283,59 @@ static esp_err_t esp_otbr_network_node_dataset_handler(httpd_req_t *req, const c
     char format[256];
     uint16_t errcode = 0;
 
-    if (req->method == HTTP_GET)
-    {
+    if (req->method == HTTP_GET) {
         if (httpd_req_get_hdr_value_str(req, ESP_OT_REST_ACCEPT_HEADER, format, sizeof(format)) == ESP_OK &&
-            strcmp(format, ESP_OT_REST_CONTENT_TYPE_PLAIN) == 0)
-        {
+            strcmp(format, ESP_OT_REST_CONTENT_TYPE_PLAIN) == 0) {
             cJSON_AddItemToObject(request, ESP_OT_REST_ACCEPT_HEADER,
                                   cJSON_CreateString(ESP_OT_REST_CONTENT_TYPE_PLAIN));
-        }
-        else
-        {
+        } else {
             cJSON_AddItemToObject(request, ESP_OT_REST_ACCEPT_HEADER,
                                   cJSON_CreateString(ESP_OT_REST_CONTENT_TYPE_JSON));
         }
         response = handle_ot_resource_node_get_dataset_request(request, log);
-    }
-    else if (req->method == HTTP_PUT)
-    {
+    } else if (req->method == HTTP_PUT) {
         cJSON *value = NULL;
         if (httpd_req_get_hdr_value_str(req, ESP_OT_REST_CONTENT_TYPE_HEADER, format, sizeof(format)) == ESP_OK &&
-            strcmp(format, ESP_OT_REST_CONTENT_TYPE_PLAIN) == 0)
-        {
+            strcmp(format, ESP_OT_REST_CONTENT_TYPE_PLAIN) == 0) {
             cJSON_AddItemToObject(request, ESP_OT_REST_CONTENT_TYPE_HEADER,
                                   cJSON_CreateString(ESP_OT_REST_CONTENT_TYPE_PLAIN));
             value = httpd_request_convert2_json(req, cJSON_String);
-            if (!cJSON_IsString(value))
-            {
+            if (!cJSON_IsString(value)) {
                 errcode = 400;
             }
-        }
-        else
-        {
+        } else {
             cJSON_AddItemToObject(request, ESP_OT_REST_CONTENT_TYPE_HEADER,
                                   cJSON_CreateString(ESP_OT_REST_CONTENT_TYPE_JSON));
             value = httpd_request_convert2_json(req, cJSON_Object);
-            if (!cJSON_IsObject(value))
-            {
+            if (!cJSON_IsObject(value)) {
                 errcode = 400;
             }
         }
 
-        if (errcode == 0)
-        {
+        if (errcode == 0) {
             cJSON_AddItemToObject(request, "DatasetData", value);
             handle_ot_resource_node_set_dataset_request(request, log);
-        }
-        else if (errcode == 400)
-        {
+        } else if (errcode == 400) {
             ESP_LOGE(WEB_TAG, "Invalid args");
         }
     }
 
     cJSON *value = cJSON_GetObjectItemCaseSensitive(log, "ErrorCode");
-    if (cJSON_IsNumber(value))
-    {
+    if (cJSON_IsNumber(value)) {
         errcode = (uint16_t)cJSON_GetNumberValue(value);
     }
 
     char http_return_status[64];
     ot_br_web_response_code_get(errcode, http_return_status);
     httpd_resp_set_status(req, http_return_status);
-    if (response)
-    {
-        if (cJSON_IsString(response))
-        {
+    if (response) {
+        if (cJSON_IsString(response)) {
             ESP_GOTO_ON_ERROR(httpd_send_plain_text(req, cJSON_GetStringValue(response)), exit, WEB_TAG,
                               "Failed to response %s", req->uri);
-        }
-        else
-        {
+        } else {
             ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to response %s", req->uri);
         }
-    }
-    else
-    {
+    } else {
         ESP_GOTO_ON_ERROR(httpd_resp_send(req, NULL, 0), exit, WEB_TAG, "Failed to response %s", req->uri);
     }
 
@@ -1696,48 +1597,40 @@ static esp_err_t esp_otbr_logs_stream_get_handler(httpd_req_t *req)
     uint64_t cursor = parse_log_cursor(req);
     TickType_t last_keepalive = xTaskGetTickCount();
 
-    ESP_GOTO_ON_ERROR(httpd_resp_set_type(req, "text/event-stream"), exit, WEB_TAG,
-                      "Failed to set SSE content type");
+    ESP_GOTO_ON_ERROR(httpd_resp_set_type(req, "text/event-stream"), exit, WEB_TAG, "Failed to set SSE content type");
     ESP_GOTO_ON_ERROR(httpd_resp_set_hdr(req, "Cache-Control", "no-store"), exit, WEB_TAG,
                       "Failed to set cache header");
     ESP_GOTO_ON_ERROR(httpd_resp_set_hdr(req, "Connection", "keep-alive"), exit, WEB_TAG,
                       "Failed to set SSE connection header");
-    ESP_GOTO_ON_ERROR(httpd_resp_set_hdr(req, "X-Accel-Buffering", "no"), exit, WEB_TAG,
-                      "Failed to disable buffering");
+    ESP_GOTO_ON_ERROR(httpd_resp_set_hdr(req, "X-Accel-Buffering", "no"), exit, WEB_TAG, "Failed to disable buffering");
     ESP_GOTO_ON_ERROR(httpd_resp_sendstr_chunk(req, "retry: 1000\n\n"), exit, WEB_TAG,
                       "Failed to initialize SSE stream");
 
-    while (1)
-    {
+    while (1) {
         char *log_text = NULL;
         size_t log_len = 0;
         uint64_t next_cursor = cursor;
         bool truncated = false;
 
         ret = copy_log_buffer_since(cursor, &log_text, &log_len, &next_cursor, &truncated);
-        if (ret != ESP_OK)
-        {
+        if (ret != ESP_OK) {
             client_closed = httpd_sse_stream_closed(ret);
             goto exit;
         }
 
-        if (truncated)
-        {
+        if (truncated) {
             ret = httpd_send_sse_event(req, "reset", next_cursor, "log buffer wrapped; showing newest retained output");
-            if (ret != ESP_OK)
-            {
+            if (ret != ESP_OK) {
                 free(log_text);
                 client_closed = httpd_sse_stream_closed(ret);
                 goto exit;
             }
         }
 
-        if (log_len > 0)
-        {
+        if (log_len > 0) {
             ret = httpd_send_sse_event(req, "log", next_cursor, log_text);
             free(log_text);
-            if (ret != ESP_OK)
-            {
+            if (ret != ESP_OK) {
                 client_closed = httpd_sse_stream_closed(ret);
                 goto exit;
             }
@@ -1748,11 +1641,9 @@ static esp_err_t esp_otbr_logs_stream_get_handler(httpd_req_t *req)
 
         free(log_text);
 
-        if ((xTaskGetTickCount() - last_keepalive) >= pdMS_TO_TICKS(LOG_SSE_KEEPALIVE_MS))
-        {
+        if ((xTaskGetTickCount() - last_keepalive) >= pdMS_TO_TICKS(LOG_SSE_KEEPALIVE_MS)) {
             ret = httpd_resp_sendstr_chunk(req, ": keepalive\n\n");
-            if (ret != ESP_OK)
-            {
+            if (ret != ESP_OK) {
                 client_closed = httpd_sse_stream_closed(ret);
                 goto exit;
             }
@@ -1763,8 +1654,7 @@ static esp_err_t esp_otbr_logs_stream_get_handler(httpd_req_t *req)
     }
 
 exit:
-    if (!client_closed)
-    {
+    if (!client_closed) {
         httpd_resp_sendstr_chunk(req, NULL);
         return ret;
     }
@@ -1788,8 +1678,7 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse OTA request");
 
     url = cJSON_GetObjectItemCaseSensitive(request, "url");
-    if (!cJSON_IsString(url) || !ota_url_is_valid(url->valuestring))
-    {
+    if (!cJSON_IsString(url) || !ota_url_is_valid(url->valuestring)) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_url", NULL);
@@ -1797,8 +1686,7 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (!ota_try_acquire_slot())
-    {
+    if (!ota_try_acquire_slot()) {
         http_status = HTTPD_409;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
         result = create_ota_result("busy", url->valuestring);
@@ -1807,8 +1695,7 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
     }
 
     ota_request = calloc(1, sizeof(*ota_request));
-    if (!ota_request)
-    {
+    if (!ota_request) {
         ota_release_slot();
         http_status = HTTPD_500;
         error = cJSON_CreateNumber((double)ESP_ERR_NO_MEM);
@@ -1818,8 +1705,7 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
     }
 
     ota_request->url = strdup(url->valuestring);
-    if (!ota_request->url)
-    {
+    if (!ota_request->url) {
         ota_release_slot();
         http_status = HTTPD_500;
         error = cJSON_CreateNumber((double)ESP_ERR_NO_MEM);
@@ -1828,8 +1714,8 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (xTaskCreate(ota_update_task, "br_ota_web", OTA_TASK_STACK_SIZE, ota_request, OTA_TASK_PRIORITY, NULL) != pdPASS)
-    {
+    if (xTaskCreate(ota_update_task, "br_ota_web", OTA_TASK_STACK_SIZE, ota_request, OTA_TASK_PRIORITY, NULL) !=
+        pdPASS) {
         ota_release_slot();
         http_status = HTTPD_500;
         error = cJSON_CreateNumber((double)ESP_FAIL);
@@ -1850,8 +1736,7 @@ respond:
     ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
 
 exit:
-    if (ota_request)
-    {
+    if (ota_request) {
         free(ota_request->url);
         free(ota_request);
     }
@@ -1870,8 +1755,7 @@ static esp_err_t esp_otbr_ota_upload_post_handler(httpd_req_t *req)
     cJSON *message = NULL;
     cJSON *response = NULL;
 
-    if (!ota_upload_content_type_is_valid(req))
-    {
+    if (!ota_upload_content_type_is_valid(req)) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -1879,8 +1763,7 @@ static esp_err_t esp_otbr_ota_upload_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (req->content_len <= 0)
-    {
+    if (req->content_len <= 0) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -1888,8 +1771,7 @@ static esp_err_t esp_otbr_ota_upload_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (!ota_try_acquire_slot())
-    {
+    if (!ota_try_acquire_slot()) {
         http_status = HTTPD_409;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
         result = create_ota_result("busy", NULL);
@@ -1898,8 +1780,7 @@ static esp_err_t esp_otbr_ota_upload_post_handler(httpd_req_t *req)
     }
 
     ret = ota_receive_uploaded_image(req);
-    if (ret != ESP_OK)
-    {
+    if (ret != ESP_OK) {
         ota_release_slot();
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ret);
@@ -1922,11 +1803,9 @@ respond:
 exit:
     cJSON_Delete(response);
 
-    if (restart_required)
-    {
+    if (restart_required) {
         if (xTaskCreate(ota_restart_task, "br_ota_restart", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY,
-                        NULL) != pdPASS)
-        {
+                        NULL) != pdPASS) {
             esp_restart();
         }
     }
@@ -1943,8 +1822,7 @@ static esp_err_t esp_otbr_ota_upload_app_post_handler(httpd_req_t *req)
     cJSON *message = NULL;
     cJSON *response = NULL;
 
-    if (!ota_upload_content_type_is_valid(req))
-    {
+    if (!ota_upload_content_type_is_valid(req)) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -1952,8 +1830,7 @@ static esp_err_t esp_otbr_ota_upload_app_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (req->content_len <= 0)
-    {
+    if (req->content_len <= 0) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -1961,8 +1838,7 @@ static esp_err_t esp_otbr_ota_upload_app_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (!ota_try_acquire_slot())
-    {
+    if (!ota_try_acquire_slot()) {
         http_status = HTTPD_409;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
         result = create_ota_result("busy", NULL);
@@ -1972,8 +1848,7 @@ static esp_err_t esp_otbr_ota_upload_app_post_handler(httpd_req_t *req)
 
     ret = ota_receive_app_image(req);
     ota_release_slot();
-    if (ret != ESP_OK)
-    {
+    if (ret != ESP_OK) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ret);
         result = create_ota_result("upload_failed", NULL);
@@ -2005,8 +1880,7 @@ static esp_err_t esp_otbr_ota_upload_rcp_post_handler(httpd_req_t *req)
     cJSON *message = NULL;
     cJSON *response = NULL;
 
-    if (!ota_upload_content_type_is_valid(req))
-    {
+    if (!ota_upload_content_type_is_valid(req)) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -2014,8 +1888,7 @@ static esp_err_t esp_otbr_ota_upload_rcp_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (req->content_len <= 0)
-    {
+    if (req->content_len <= 0) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -2023,8 +1896,7 @@ static esp_err_t esp_otbr_ota_upload_rcp_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (!ota_try_acquire_slot())
-    {
+    if (!ota_try_acquire_slot()) {
         http_status = HTTPD_409;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
         result = create_ota_result("busy", NULL);
@@ -2034,8 +1906,7 @@ static esp_err_t esp_otbr_ota_upload_rcp_post_handler(httpd_req_t *req)
 
     ret = ota_receive_rcp_image(req);
     ota_release_slot();
-    if (ret != ESP_OK)
-    {
+    if (ret != ESP_OK) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ret);
         result = create_ota_result("upload_failed", NULL);
@@ -2067,8 +1938,7 @@ static esp_err_t esp_otbr_ota_upload_web_post_handler(httpd_req_t *req)
     cJSON *message = NULL;
     cJSON *response = NULL;
 
-    if (!ota_upload_content_type_is_valid(req))
-    {
+    if (!ota_upload_content_type_is_valid(req)) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -2076,8 +1946,7 @@ static esp_err_t esp_otbr_ota_upload_web_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (req->content_len <= 0)
-    {
+    if (req->content_len <= 0) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_upload", NULL);
@@ -2085,8 +1954,7 @@ static esp_err_t esp_otbr_ota_upload_web_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (!ota_try_acquire_slot())
-    {
+    if (!ota_try_acquire_slot()) {
         http_status = HTTPD_409;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_STATE);
         result = create_ota_result("busy", NULL);
@@ -2096,8 +1964,7 @@ static esp_err_t esp_otbr_ota_upload_web_post_handler(httpd_req_t *req)
 
     ret = ota_receive_web_image(req);
     ota_release_slot();
-    if (ret != ESP_OK)
-    {
+    if (ret != ESP_OK) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ret);
         result = create_ota_result("upload_failed", NULL);
@@ -2130,9 +1997,8 @@ static esp_err_t esp_otbr_ota_restart_post_handler(httpd_req_t *req)
     ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build OTA restart response");
     ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
 
-    if (xTaskCreate(ota_restart_task, "br_ota_restart", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY,
-                    NULL) != pdPASS)
-    {
+    if (xTaskCreate(ota_restart_task, "br_ota_restart", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY, NULL) !=
+        pdPASS) {
         esp_restart();
     }
 
@@ -2220,21 +2086,17 @@ static esp_err_t esp_otbr_leader_weight_put_handler(httpd_req_t *req)
     cJSON *message = NULL;
 
     request = httpd_request_convert2_json(req, cJSON_Object);
-    if (!request)
-    {
+    if (!request) {
         ESP_LOGE(WEB_TAG, "Failed to parse leader weight request");
         return ESP_FAIL;
     }
 
     cJSON *weight_json = cJSON_GetObjectItem(request, "weight");
-    if (!cJSON_IsNumber(weight_json) || weight_json->valueint < 0 || weight_json->valueint > 255)
-    {
+    if (!cJSON_IsNumber(weight_json) || weight_json->valueint < 0 || weight_json->valueint > 255) {
         error = cJSON_CreateNumber((double)OT_ERROR_INVALID_ARGS);
         result = cJSON_CreateString("failed");
         message = cJSON_CreateString("Missing or invalid 'weight' field (0-255 required)");
-    }
-    else
-    {
+    } else {
         handle_ot_leader_weight_put_request((uint8_t)weight_json->valueint);
         error = cJSON_CreateNumber((double)OT_ERROR_NONE);
         result = cJSON_CreateString("ok");
@@ -2255,7 +2117,8 @@ static esp_err_t esp_otbr_become_leader_post_handler(httpd_req_t *req)
     otError err = handle_ot_become_leader_request();
     cJSON *error = cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("ok");
-    cJSON *message = err ? cJSON_CreateString(otThreadErrorToString(err)) : cJSON_CreateString("Become-leader request submitted");
+    cJSON *message =
+        err ? cJSON_CreateString(otThreadErrorToString(err)) : cJSON_CreateString("Become-leader request submitted");
     cJSON *response = pack_response(error, result, message);
     ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
 exit:
@@ -2273,9 +2136,8 @@ static esp_err_t esp_otbr_restart_post_handler(httpd_req_t *req)
     ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build restart response");
     ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
 
-    if (xTaskCreate(ota_restart_task, "br_restart", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY,
-                    NULL) != pdPASS)
-    {
+    if (xTaskCreate(ota_restart_task, "br_restart", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY, NULL) !=
+        pdPASS) {
         esp_restart();
     }
 
@@ -2295,8 +2157,7 @@ static esp_err_t esp_otbr_factory_reset_post_handler(httpd_req_t *req)
     char *http_status = "200 OK";
 
     request = httpd_request_convert2_json(req, cJSON_Object);
-    if (!request)
-    {
+    if (!request) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = cJSON_CreateString("invalid_request");
@@ -2305,8 +2166,7 @@ static esp_err_t esp_otbr_factory_reset_post_handler(httpd_req_t *req)
     }
 
     cJSON *confirm = cJSON_GetObjectItemCaseSensitive(request, "confirm");
-    if (!cJSON_IsString(confirm) || strcmp(confirm->valuestring, "FACTORY_RESET") != 0)
-    {
+    if (!cJSON_IsString(confirm) || strcmp(confirm->valuestring, "FACTORY_RESET") != 0) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = cJSON_CreateString("invalid_confirmation");
@@ -2315,8 +2175,7 @@ static esp_err_t esp_otbr_factory_reset_post_handler(httpd_req_t *req)
     }
 
     esp_err_t erase_ret = nvs_flash_erase();
-    if (erase_ret != ESP_OK)
-    {
+    if (erase_ret != ESP_OK) {
         http_status = HTTPD_500;
         error = cJSON_CreateNumber((double)erase_ret);
         result = cJSON_CreateString("erase_failed");
@@ -2334,11 +2193,9 @@ respond:
     ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build factory reset response");
     ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
 
-    if (strcmp(http_status, "200 OK") == 0)
-    {
+    if (strcmp(http_status, "200 OK") == 0) {
         if (xTaskCreate(ota_restart_task, "br_factory_rst", OTA_RESTART_TASK_STACK_SIZE, NULL, OTA_TASK_PRIORITY,
-                        NULL) != pdPASS)
-        {
+                        NULL) != pdPASS) {
             esp_restart();
         }
     }
@@ -2374,118 +2231,100 @@ static esp_err_t esp_otbr_nvs_backup_get_handler(httpd_req_t *req)
 
     blob_buf = malloc(NVS_BACKUP_BLOB_MAX);
     b64_buf = malloc(NVS_BACKUP_B64_MAX);
-    if (!blob_buf || !b64_buf)
-    {
+    if (!blob_buf || !b64_buf) {
         ret = ESP_ERR_NO_MEM;
         goto exit;
     }
 
     esp_err_t it_ret = nvs_entry_find("nvs", NULL, NVS_TYPE_ANY, &it);
-    while (it_ret == ESP_OK)
-    {
+    while (it_ret == ESP_OK) {
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
 
         /* Get or create namespace object in JSON */
         cJSON *ns_obj = cJSON_GetObjectItemCaseSensitive(entries, info.namespace_name);
-        if (!ns_obj)
-        {
+        if (!ns_obj) {
             ns_obj = cJSON_AddObjectToObject(entries, info.namespace_name);
         }
 
         /* Open namespace handle if not already open for this namespace */
-        if (!ns_open || (ns_open && ns_handle &&
-                         strcmp(cJSON_GetObjectItemCaseSensitive(root, "_cur_ns") ? cJSON_GetObjectItemCaseSensitive(root, "_cur_ns")->valuestring : "", info.namespace_name) != 0))
-        {
-            if (ns_open)
-            {
+        if (!ns_open ||
+            (ns_open && ns_handle &&
+             strcmp(cJSON_GetObjectItemCaseSensitive(root, "_cur_ns")
+                        ? cJSON_GetObjectItemCaseSensitive(root, "_cur_ns")->valuestring
+                        : "",
+                    info.namespace_name) != 0)) {
+            if (ns_open) {
                 nvs_close(ns_handle);
                 ns_open = false;
             }
-            if (nvs_open(info.namespace_name, NVS_READONLY, &ns_handle) == ESP_OK)
-            {
+            if (nvs_open(info.namespace_name, NVS_READONLY, &ns_handle) == ESP_OK) {
                 ns_open = true;
             }
         }
 
-        if (ns_obj && ns_open)
-        {
+        if (ns_obj && ns_open) {
             cJSON *entry_obj = cJSON_CreateObject();
             bool entry_ok = false;
 
-            switch (info.type)
-            {
-            case NVS_TYPE_U8:
-            {
+            switch (info.type) {
+            case NVS_TYPE_U8: {
                 uint8_t v = 0;
-                if (nvs_get_u8(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_u8(ns_handle, info.key, &v) == ESP_OK) {
                     cJSON_AddStringToObject(entry_obj, "type", "u8");
                     cJSON_AddNumberToObject(entry_obj, "value", (double)v);
                     entry_ok = true;
                 }
                 break;
             }
-            case NVS_TYPE_I8:
-            {
+            case NVS_TYPE_I8: {
                 int8_t v = 0;
-                if (nvs_get_i8(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_i8(ns_handle, info.key, &v) == ESP_OK) {
                     cJSON_AddStringToObject(entry_obj, "type", "i8");
                     cJSON_AddNumberToObject(entry_obj, "value", (double)v);
                     entry_ok = true;
                 }
                 break;
             }
-            case NVS_TYPE_U16:
-            {
+            case NVS_TYPE_U16: {
                 uint16_t v = 0;
-                if (nvs_get_u16(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_u16(ns_handle, info.key, &v) == ESP_OK) {
                     cJSON_AddStringToObject(entry_obj, "type", "u16");
                     cJSON_AddNumberToObject(entry_obj, "value", (double)v);
                     entry_ok = true;
                 }
                 break;
             }
-            case NVS_TYPE_I16:
-            {
+            case NVS_TYPE_I16: {
                 int16_t v = 0;
-                if (nvs_get_i16(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_i16(ns_handle, info.key, &v) == ESP_OK) {
                     cJSON_AddStringToObject(entry_obj, "type", "i16");
                     cJSON_AddNumberToObject(entry_obj, "value", (double)v);
                     entry_ok = true;
                 }
                 break;
             }
-            case NVS_TYPE_U32:
-            {
+            case NVS_TYPE_U32: {
                 uint32_t v = 0;
-                if (nvs_get_u32(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_u32(ns_handle, info.key, &v) == ESP_OK) {
                     cJSON_AddStringToObject(entry_obj, "type", "u32");
                     cJSON_AddNumberToObject(entry_obj, "value", (double)v);
                     entry_ok = true;
                 }
                 break;
             }
-            case NVS_TYPE_I32:
-            {
+            case NVS_TYPE_I32: {
                 int32_t v = 0;
-                if (nvs_get_i32(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_i32(ns_handle, info.key, &v) == ESP_OK) {
                     cJSON_AddStringToObject(entry_obj, "type", "i32");
                     cJSON_AddNumberToObject(entry_obj, "value", (double)v);
                     entry_ok = true;
                 }
                 break;
             }
-            case NVS_TYPE_U64:
-            {
+            case NVS_TYPE_U64: {
                 uint64_t v = 0;
-                if (nvs_get_u64(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_u64(ns_handle, info.key, &v) == ESP_OK) {
                     /* JSON numbers lose precision for large u64 values; store as string */
                     char num_str[24];
                     snprintf(num_str, sizeof(num_str), "%llu", (unsigned long long)v);
@@ -2495,11 +2334,9 @@ static esp_err_t esp_otbr_nvs_backup_get_handler(httpd_req_t *req)
                 }
                 break;
             }
-            case NVS_TYPE_I64:
-            {
+            case NVS_TYPE_I64: {
                 int64_t v = 0;
-                if (nvs_get_i64(ns_handle, info.key, &v) == ESP_OK)
-                {
+                if (nvs_get_i64(ns_handle, info.key, &v) == ESP_OK) {
                     char num_str[24];
                     snprintf(num_str, sizeof(num_str), "%lld", (long long)v);
                     cJSON_AddStringToObject(entry_obj, "type", "i64");
@@ -2508,14 +2345,11 @@ static esp_err_t esp_otbr_nvs_backup_get_handler(httpd_req_t *req)
                 }
                 break;
             }
-            case NVS_TYPE_STR:
-            {
+            case NVS_TYPE_STR: {
                 size_t str_len = 0;
                 if (nvs_get_str(ns_handle, info.key, NULL, &str_len) == ESP_OK && str_len > 0 &&
-                    str_len <= NVS_BACKUP_BLOB_MAX)
-                {
-                    if (nvs_get_str(ns_handle, info.key, (char *)blob_buf, &str_len) == ESP_OK)
-                    {
+                    str_len <= NVS_BACKUP_BLOB_MAX) {
+                    if (nvs_get_str(ns_handle, info.key, (char *)blob_buf, &str_len) == ESP_OK) {
                         cJSON_AddStringToObject(entry_obj, "type", "str");
                         cJSON_AddStringToObject(entry_obj, "value", (char *)blob_buf);
                         entry_ok = true;
@@ -2523,18 +2357,14 @@ static esp_err_t esp_otbr_nvs_backup_get_handler(httpd_req_t *req)
                 }
                 break;
             }
-            case NVS_TYPE_BLOB:
-            {
+            case NVS_TYPE_BLOB: {
                 size_t blob_len = 0;
                 if (nvs_get_blob(ns_handle, info.key, NULL, &blob_len) == ESP_OK && blob_len > 0 &&
-                    blob_len <= NVS_BACKUP_BLOB_MAX)
-                {
-                    if (nvs_get_blob(ns_handle, info.key, blob_buf, &blob_len) == ESP_OK)
-                    {
+                    blob_len <= NVS_BACKUP_BLOB_MAX) {
+                    if (nvs_get_blob(ns_handle, info.key, blob_buf, &blob_len) == ESP_OK) {
                         size_t b64_len = 0;
                         int b64_ret = mbedtls_base64_encode(b64_buf, NVS_BACKUP_B64_MAX, &b64_len, blob_buf, blob_len);
-                        if (b64_ret == 0 && b64_len > 0)
-                        {
+                        if (b64_ret == 0 && b64_len > 0) {
                             b64_buf[b64_len] = '\0';
                             cJSON_AddStringToObject(entry_obj, "type", "blob");
                             cJSON_AddStringToObject(entry_obj, "value", (char *)b64_buf);
@@ -2548,12 +2378,9 @@ static esp_err_t esp_otbr_nvs_backup_get_handler(httpd_req_t *req)
                 break;
             }
 
-            if (entry_ok)
-            {
+            if (entry_ok) {
                 cJSON_AddItemToObject(ns_obj, info.key, entry_obj);
-            }
-            else
-            {
+            } else {
                 cJSON_Delete(entry_obj);
             }
         }
@@ -2561,8 +2388,7 @@ static esp_err_t esp_otbr_nvs_backup_get_handler(httpd_req_t *req)
         it_ret = nvs_entry_next(&it);
     }
 
-    if (ns_open)
-    {
+    if (ns_open) {
         nvs_close(ns_handle);
         ns_open = false;
     }
@@ -2580,8 +2406,7 @@ static esp_err_t esp_otbr_nvs_backup_get_handler(httpd_req_t *req)
     }
 
 exit:
-    if (ns_open)
-    {
+    if (ns_open) {
         nvs_close(ns_handle);
     }
     free(blob_buf);
@@ -2605,8 +2430,7 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
     cJSON *message = NULL;
     cJSON *response = NULL;
 
-    if (req->content_len == 0 || req->content_len > (512 * 1024))
-    {
+    if (req->content_len == 0 || req->content_len > (512 * 1024)) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = cJSON_CreateString("invalid_request");
@@ -2615,8 +2439,7 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
     }
 
     body = malloc(req->content_len + 1);
-    if (!body)
-    {
+    if (!body) {
         http_status = HTTPD_500;
         error = cJSON_CreateNumber((double)ESP_ERR_NO_MEM);
         result = cJSON_CreateString("oom");
@@ -2627,15 +2450,12 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
     {
         int received = 0;
         int total = 0;
-        while (total < (int)req->content_len)
-        {
+        while (total < (int)req->content_len) {
             received = httpd_req_recv(req, body + total, req->content_len - total);
-            if (received == HTTPD_SOCK_ERR_TIMEOUT)
-            {
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
                 continue;
             }
-            if (received <= 0)
-            {
+            if (received <= 0) {
                 http_status = HTTPD_500;
                 error = cJSON_CreateNumber((double)ESP_FAIL);
                 result = cJSON_CreateString("receive_error");
@@ -2648,8 +2468,7 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
     }
 
     root = cJSON_Parse(body);
-    if (!root)
-    {
+    if (!root) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = cJSON_CreateString("parse_error");
@@ -2658,8 +2477,7 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
     }
 
     entries = cJSON_GetObjectItemCaseSensitive(root, "entries");
-    if (!cJSON_IsObject(entries))
-    {
+    if (!cJSON_IsObject(entries)) {
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = cJSON_CreateString("invalid_format");
@@ -2672,14 +2490,12 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
     cJSON_ArrayForEach(ns_item, entries)
     {
         const char *ns_name = ns_item->string;
-        if (!ns_name || !cJSON_IsObject(ns_item))
-        {
+        if (!ns_name || !cJSON_IsObject(ns_item)) {
             continue;
         }
 
         nvs_handle_t ns_handle = 0;
-        if (nvs_open(ns_name, NVS_READWRITE, &ns_handle) != ESP_OK)
-        {
+        if (nvs_open(ns_name, NVS_READWRITE, &ns_handle) != ESP_OK) {
             ESP_LOGW(WEB_TAG, "NVS restore: could not open namespace '%s', skipping", ns_name);
             continue;
         }
@@ -2688,77 +2504,52 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
         cJSON_ArrayForEach(key_item, ns_item)
         {
             const char *key = key_item->string;
-            if (!key || !cJSON_IsObject(key_item))
-            {
+            if (!key || !cJSON_IsObject(key_item)) {
                 continue;
             }
 
             cJSON *type_j = cJSON_GetObjectItemCaseSensitive(key_item, "type");
             cJSON *value_j = cJSON_GetObjectItemCaseSensitive(key_item, "value");
-            if (!cJSON_IsString(type_j) || !value_j)
-            {
+            if (!cJSON_IsString(type_j) || !value_j) {
                 continue;
             }
 
             const char *type = type_j->valuestring;
             esp_err_t set_ret = ESP_OK;
 
-            if (strcmp(type, "u8") == 0 && cJSON_IsNumber(value_j))
-            {
+            if (strcmp(type, "u8") == 0 && cJSON_IsNumber(value_j)) {
                 set_ret = nvs_set_u8(ns_handle, key, (uint8_t)value_j->valuedouble);
-            }
-            else if (strcmp(type, "i8") == 0 && cJSON_IsNumber(value_j))
-            {
+            } else if (strcmp(type, "i8") == 0 && cJSON_IsNumber(value_j)) {
                 set_ret = nvs_set_i8(ns_handle, key, (int8_t)value_j->valuedouble);
-            }
-            else if (strcmp(type, "u16") == 0 && cJSON_IsNumber(value_j))
-            {
+            } else if (strcmp(type, "u16") == 0 && cJSON_IsNumber(value_j)) {
                 set_ret = nvs_set_u16(ns_handle, key, (uint16_t)value_j->valuedouble);
-            }
-            else if (strcmp(type, "i16") == 0 && cJSON_IsNumber(value_j))
-            {
+            } else if (strcmp(type, "i16") == 0 && cJSON_IsNumber(value_j)) {
                 set_ret = nvs_set_i16(ns_handle, key, (int16_t)value_j->valuedouble);
-            }
-            else if (strcmp(type, "u32") == 0 && cJSON_IsNumber(value_j))
-            {
+            } else if (strcmp(type, "u32") == 0 && cJSON_IsNumber(value_j)) {
                 set_ret = nvs_set_u32(ns_handle, key, (uint32_t)value_j->valuedouble);
-            }
-            else if (strcmp(type, "i32") == 0 && cJSON_IsNumber(value_j))
-            {
+            } else if (strcmp(type, "i32") == 0 && cJSON_IsNumber(value_j)) {
                 set_ret = nvs_set_i32(ns_handle, key, (int32_t)value_j->valuedouble);
-            }
-            else if (strcmp(type, "u64") == 0 && cJSON_IsString(value_j))
-            {
+            } else if (strcmp(type, "u64") == 0 && cJSON_IsString(value_j)) {
                 uint64_t v = (uint64_t)strtoull(value_j->valuestring, NULL, 10);
                 set_ret = nvs_set_u64(ns_handle, key, v);
-            }
-            else if (strcmp(type, "i64") == 0 && cJSON_IsString(value_j))
-            {
+            } else if (strcmp(type, "i64") == 0 && cJSON_IsString(value_j)) {
                 int64_t v = (int64_t)strtoll(value_j->valuestring, NULL, 10);
                 set_ret = nvs_set_i64(ns_handle, key, v);
-            }
-            else if (strcmp(type, "str") == 0 && cJSON_IsString(value_j))
-            {
+            } else if (strcmp(type, "str") == 0 && cJSON_IsString(value_j)) {
                 set_ret = nvs_set_str(ns_handle, key, value_j->valuestring);
-            }
-            else if (strcmp(type, "blob") == 0 && cJSON_IsString(value_j))
-            {
+            } else if (strcmp(type, "blob") == 0 && cJSON_IsString(value_j)) {
                 const char *b64 = value_j->valuestring;
                 size_t b64_len = strlen(b64);
                 size_t decoded_len = 0;
                 /* mbedtls_base64_decode with NULL output gives required size */
-                int b64_ret = mbedtls_base64_decode(NULL, 0, &decoded_len,
-                                                    (const unsigned char *)b64, b64_len);
+                int b64_ret = mbedtls_base64_decode(NULL, 0, &decoded_len, (const unsigned char *)b64, b64_len);
                 /* b64_ret == MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL is expected when dest is NULL */
-                if (decoded_len > 0 && decoded_len <= NVS_BACKUP_BLOB_MAX)
-                {
+                if (decoded_len > 0 && decoded_len <= NVS_BACKUP_BLOB_MAX) {
                     uint8_t *blob = malloc(decoded_len);
-                    if (blob)
-                    {
-                        b64_ret = mbedtls_base64_decode(blob, decoded_len, &decoded_len,
-                                                        (const unsigned char *)b64, b64_len);
-                        if (b64_ret == 0)
-                        {
+                    if (blob) {
+                        b64_ret =
+                            mbedtls_base64_decode(blob, decoded_len, &decoded_len, (const unsigned char *)b64, b64_len);
+                        if (b64_ret == 0) {
                             set_ret = nvs_set_blob(ns_handle, key, blob, decoded_len);
                         }
                         free(blob);
@@ -2766,8 +2557,7 @@ static esp_err_t esp_otbr_nvs_restore_post_handler(httpd_req_t *req)
                 }
             }
 
-            if (set_ret != ESP_OK)
-            {
+            if (set_ret != ESP_OK) {
                 ESP_LOGW(WEB_TAG, "NVS restore: failed to set %s/%s: %s", ns_name, key, esp_err_to_name(set_ret));
             }
         }
@@ -2819,15 +2609,12 @@ static esp_err_t esp_otbr_network_topology_get_handler(httpd_req_t *req)
                       "Failed to send chunk");
 
     int array_size = cJSON_GetArraySize(result);
-    for (int i = 0; i < array_size; i++)
-    {
+    for (int i = 0; i < array_size; i++) {
         cJSON *detached = cJSON_DetachItemFromArray(result, 0);
         char *chunk = cJSON_PrintUnformatted(detached);
         cJSON_Delete(detached);
-        if (chunk)
-        {
-            if (i > 0)
-            {
+        if (chunk) {
+            if (i > 0) {
                 ESP_GOTO_ON_ERROR(httpd_resp_sendstr_chunk(req, ","), exit, WEB_TAG, "Failed to send chunk");
             }
             esp_err_t send_err = httpd_resp_sendstr_chunk(req, chunk);
@@ -2933,10 +2720,8 @@ static esp_err_t httpd_resp_send_spiffs_file(httpd_req_t *req, char *path)
 
     char buf[FILE_CHUNK_SIZE];
     size_t bytes_read;
-    while ((bytes_read = fread(buf, 1, sizeof(buf), fp)) > 0)
-    {
-        if (httpd_resp_send_chunk(req, buf, bytes_read) != ESP_OK)
-        {
+    while ((bytes_read = fread(buf, 1, sizeof(buf), fp)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, bytes_read) != ESP_OK) {
             fclose(fp);
             /* Abort chunked transfer on send error */
             httpd_resp_send_chunk(req, NULL, 0);
@@ -3003,14 +2788,12 @@ static request_url_t parse_request_url_information(const char *uri, const struct
         .file_path = "",
     };
     ret.port = parse_url->port;
-    if ((parse_url->field_set & (1 << UF_SCHEMA)) != 0 && PROTLOCOL_MAX_SIZE > parse_url->field_data[UF_SCHEMA].len)
-    {
+    if ((parse_url->field_set & (1 << UF_SCHEMA)) != 0 && PROTLOCOL_MAX_SIZE > parse_url->field_data[UF_SCHEMA].len) {
         memcpy(ret.protocol, uri + parse_url->field_data[UF_SCHEMA].off, parse_url->field_data[UF_SCHEMA].len);
         ret.protocol[parse_url->field_data[UF_SCHEMA].len] = '\0';
     }
 
-    if ((parse_url->field_set & (1 << UF_PATH)) != 0 && FILENAME_MAX_SIZE > parse_url->field_data[UF_PATH].len)
-    {
+    if ((parse_url->field_set & (1 << UF_PATH)) != 0 && FILENAME_MAX_SIZE > parse_url->field_data[UF_PATH].len) {
         memcpy(ret.file_name, uri + parse_url->field_data[UF_PATH].off, parse_url->field_data[UF_PATH].len);
         ret.file_name[parse_url->field_data[UF_PATH].len] = '\0';
         memcpy(ret.file_path, base_path, strlen(base_path));
@@ -3026,8 +2809,7 @@ static bool str_ends_with(const char *str, const char *suffix)
 {
     size_t str_len = strlen(str);
     size_t suffix_len = strlen(suffix);
-    if (suffix_len > str_len)
-    {
+    if (suffix_len > str_len) {
         return false;
     }
     return strcmp(str + str_len - suffix_len, suffix) == 0;
@@ -3046,8 +2828,7 @@ static esp_err_t default_urls_get_handler(httpd_req_t *req)
 {
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
     // Check if this is a WiFi config request (when WiFi config mode is active)
-    if (esp_br_wifi_config_is_active())
-    {
+    if (esp_br_wifi_config_is_active()) {
         // Let WiFi config server handle it
         return ESP_OK;
     }
@@ -3069,8 +2850,7 @@ static esp_err_t default_urls_get_handler(httpd_req_t *req)
     }
 
     /* Root path: serve index.html */
-    if (strcmp(info.file_name, "/") == 0)
-    {
+    if (strcmp(info.file_name, "/") == 0) {
         char index_path[FILEPATH_MAX_SIZE];
         strcpy(index_path, ((http_server_data_t *)req->user_ctx)->base_path);
         strcat(index_path, "/index.html");
@@ -3078,22 +2858,16 @@ static esp_err_t default_urls_get_handler(httpd_req_t *req)
     }
 
     /* Favicon: served from embedded binary */
-    if (strcmp(info.file_name, "/favicon.ico") == 0)
-    {
+    if (strcmp(info.file_name, "/favicon.ico") == 0) {
         return favicon_get_handler(req);
     }
 
     /* Extension-based routing for SPIFFS files */
-    if (str_ends_with(info.file_name, ".html"))
-    {
+    if (str_ends_with(info.file_name, ".html")) {
         return index_html_get_handler(req, info.file_path);
-    }
-    else if (str_ends_with(info.file_name, ".css"))
-    {
+    } else if (str_ends_with(info.file_name, ".css")) {
         return style_css_get_handler(req, info.file_path);
-    }
-    else if (str_ends_with(info.file_name, ".js"))
-    {
+    } else if (str_ends_with(info.file_name, ".js")) {
         return script_js_get_handler(req, info.file_path);
     }
 
@@ -3133,8 +2907,7 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path, const cha
     esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
     esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
 
-    if (!s_ota_mutex)
-    {
+    if (!s_ota_mutex) {
         s_ota_mutex = xSemaphoreCreateMutex();
         ESP_RETURN_ON_FALSE(s_ota_mutex, NULL, WEB_TAG, "Failed to create OTA mutex");
     }
@@ -3199,8 +2972,7 @@ void stop_httpserver(httpd_handle_t server)
 void disconnect_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     http_server_data_t *data = (http_server_data_t *)event_data;
-    if (data)
-    {
+    if (data) {
         free(data);
         data = NULL;
     }
@@ -3216,29 +2988,22 @@ static void handler_got_ip_event(void *arg, esp_event_base_t event_base, int32_t
 {
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
     // Don't start Thread BR web server if WiFi config mode is active
-    if (esp_br_wifi_config_is_active())
-    {
+    if (esp_br_wifi_config_is_active()) {
         ESP_LOGI(WEB_TAG, "WiFi config mode is active, skipping Thread BR web server");
         return;
     }
 #endif
 
-    if (!is_br_web_server_started)
-    {
+    if (!is_br_web_server_started) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         char ipv4_address[SERVER_IPV4_LEN];
         sprintf((char *)ipv4_address, IPSTR, IP2STR(&event->ip_info.ip));
-        if (start_esp_br_http_server((const char *)arg, (char *)ipv4_address) != NULL)
-        {
+        if (start_esp_br_http_server((const char *)arg, (char *)ipv4_address) != NULL) {
             is_br_web_server_started = true;
-        }
-        else
-        {
+        } else {
             ESP_LOGE(WEB_TAG, "Fail to start web server");
         }
-    }
-    else
-    {
+    } else {
         ESP_LOGW(WEB_TAG, "Web server had already been started");
     }
 }

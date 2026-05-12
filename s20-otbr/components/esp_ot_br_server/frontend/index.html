@@ -155,7 +155,7 @@
             document.getElementById('p-partid').textContent = r['Network:PartitionID'] || '-';
             document.getElementById('p-uptime').textContent = r['System:Uptime'] || '-';
             document.getElementById('p-heap').textContent = r['System:FreeHeap'] || '-';
-            var tvMap = {'2':'1.1','3':'1.2','4':'1.3','5':'1.4'};
+            var tvMap = { '2': '1.1', '3': '1.2', '4': '1.3', '5': '1.4' };
             document.getElementById('p-tver').textContent = tvMap[r['OpenThread:ThreadVersion']] || r['OpenThread:ThreadVersion'] || '-';
             document.getElementById('p-eui64').textContent = r['RCP:EUI64'] || '-';
             document.getElementById('p-baid').textContent = r['Network:BorderAgentID'] || '-';
