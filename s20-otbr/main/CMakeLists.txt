@@ -9,6 +9,7 @@ idf_component_register(SRCS "esp_ot_br.c"
                                 esp_ot_cli_extension
                                 esp_driver_uart
                                 mdns
+                                nvs_config
                                 nvs_flash
                                 openthread
                                 spiffs
