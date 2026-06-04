@@ -136,6 +136,8 @@ static esp_err_t esp_otbr_network_node_baid_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_network_node_coprocessor_version_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_network_node_dataset_active_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_network_node_dataset_pending_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_network_node_dataset_active_delete_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_network_node_dataset_pending_delete_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_network_node_dataset_handler(httpd_req_t *req, const char *dataset_type);
 
 static httpd_uri_t s_resource_handlers[] = {
@@ -230,6 +232,12 @@ static httpd_uri_t s_resource_handlers[] = {
         .user_ctx = &s_server.data,
     },
     {
+        .uri = ESP_OT_REST_API_NODE_DATASET_ACTIVE_PATH,
+        .method = HTTP_DELETE,
+        .handler = esp_otbr_network_node_dataset_active_delete_handler,
+        .user_ctx = NULL,
+    },
+    {
         .uri = ESP_OT_REST_API_NODE_DATASET_PENDING_PATH,
         .method = HTTP_GET,
         .handler = esp_otbr_network_node_dataset_pending_handler,
@@ -240,6 +248,12 @@ static httpd_uri_t s_resource_handlers[] = {
         .method = HTTP_PUT,
         .handler = esp_otbr_network_node_dataset_pending_handler,
         .user_ctx = &s_server.data,
+    },
+    {
+        .uri = ESP_OT_REST_API_NODE_DATASET_PENDING_PATH,
+        .method = HTTP_DELETE,
+        .handler = esp_otbr_network_node_dataset_pending_delete_handler,
+        .user_ctx = NULL,
     },
     {
         .uri = ESP_OT_REST_API_NODE_COPROCESSOR_VERSION_PATH,
@@ -1311,6 +1325,38 @@ static esp_err_t esp_otbr_network_node_dataset_active_handler(httpd_req_t *req)
 static esp_err_t esp_otbr_network_node_dataset_pending_handler(httpd_req_t *req)
 {
     return esp_otbr_network_node_dataset_handler(req, ESP_OT_DATASET_TYPE_PENDING);
+}
+
+static esp_err_t esp_otbr_network_node_dataset_active_delete_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    otError error = handle_ot_resource_node_delete_dataset_request(ESP_OT_DATASET_TYPE_ACTIVE);
+    if (error == OT_ERROR_NONE) {
+        httpd_resp_set_status(req, HTTPD_200);
+    } else if (error == OT_ERROR_INVALID_STATE) {
+        httpd_resp_set_status(req, HTTPD_409);
+    } else {
+        httpd_resp_set_status(req, HTTPD_500);
+    }
+    ESP_GOTO_ON_ERROR(httpd_resp_send(req, NULL, 0), exit, WEB_TAG, "Failed to response %s", req->uri);
+exit:
+    return ret;
+}
+
+static esp_err_t esp_otbr_network_node_dataset_pending_delete_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    otError error = handle_ot_resource_node_delete_dataset_request(ESP_OT_DATASET_TYPE_PENDING);
+    if (error == OT_ERROR_NONE) {
+        httpd_resp_set_status(req, HTTPD_200);
+    } else if (error == OT_ERROR_INVALID_STATE) {
+        httpd_resp_set_status(req, HTTPD_409);
+    } else {
+        httpd_resp_set_status(req, HTTPD_500);
+    }
+    ESP_GOTO_ON_ERROR(httpd_resp_send(req, NULL, 0), exit, WEB_TAG, "Failed to response %s", req->uri);
+exit:
+    return ret;
 }
 
 static esp_err_t esp_otbr_network_node_dataset_handler(httpd_req_t *req, const char *dataset_type)

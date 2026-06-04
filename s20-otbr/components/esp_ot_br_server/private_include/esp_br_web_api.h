@@ -195,6 +195,18 @@ otError handle_ot_resource_node_state_put_request(cJSON *request);
 void handle_ot_resource_node_set_dataset_request(const cJSON *request, cJSON *log);
 
 /**
+ * @brief Delete the active or pending operational dataset.
+ *
+ * @param [in] dataset_type  ESP_OT_DATASET_TYPE_ACTIVE or ESP_OT_DATASET_TYPE_PENDING.
+ *
+ * @return
+ *      -   OT_ERROR_NONE           :   On success.
+ *      -   OT_ERROR_INVALID_STATE  :   Thread is active; cannot delete active dataset.
+ *      -   OT_ERROR_INVALID_ARGS   :   Unknown dataset type.
+ */
+otError handle_ot_resource_node_delete_dataset_request(const char *dataset_type);
+
+/**
  * @brief Handle the Thread network formation @param request and provide @param log
  *
  * @param [in] request  A cJSON format from http request for forming network.

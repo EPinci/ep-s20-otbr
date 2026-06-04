@@ -361,6 +361,30 @@ exit:
     cJSON_AddItemToObject(log, "ErrorCode", cJSON_CreateNumber(errcode));
 }
 
+otError handle_ot_resource_node_delete_dataset_request(const char *dataset_type)
+{
+    otError ret = OT_ERROR_NONE;
+    otOperationalDatasetTlvs emptyTlvs;
+    memset(&emptyTlvs, 0, sizeof(emptyTlvs));
+
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    otInstance *ins = esp_openthread_get_instance();
+
+    if (strcmp(dataset_type, ESP_OT_DATASET_TYPE_ACTIVE) == 0) {
+        ESP_GOTO_ON_FALSE(otThreadGetDeviceRole(ins) == OT_DEVICE_ROLE_DISABLED, OT_ERROR_INVALID_STATE, exit, API_TAG,
+                          "Cannot delete active dataset while Thread is active");
+        ret = otDatasetSetActiveTlvs(ins, &emptyTlvs);
+    } else if (strcmp(dataset_type, ESP_OT_DATASET_TYPE_PENDING) == 0) {
+        ret = otDatasetSetPendingTlvs(ins, &emptyTlvs);
+    } else {
+        ret = OT_ERROR_INVALID_ARGS;
+    }
+
+exit:
+    esp_openthread_lock_release();
+    return ret;
+}
+
 /*----------------------------------------------------------------------
                                 thread status
 ----------------------------------------------------------------------*/
