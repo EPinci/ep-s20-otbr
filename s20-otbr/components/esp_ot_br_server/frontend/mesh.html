@@ -21,9 +21,10 @@
                 <div class="card-header" style="border:none;margin:0;padding:0">Thread Mesh</div>
                 <button class="btn btn-sm" id="meshToggleBtn" onclick="setThreadState()" disabled>...</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;font-size:13px">
-                <span><b>Status:</b> <span id="meshStateLabel" style="font-weight:600">loading...</span></span>
-                <span><b>RLOC16:</b> <span id="meshRloc16" style="font-family:monospace">-</span></span>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px">
+                <span><b>Network:</b> <span id="meshNetworkName" style="font-weight:600">-</span></span>
+                <span style="text-align:center"><b>Role:</b> <span id="meshStateLabel" style="font-weight:600">-</span></span>
+                <span style="text-align:right"><b>RLOC16:</b> <span id="meshRloc16" style="font-family:monospace">-</span></span>
             </div>
         </div>
 
@@ -404,7 +405,15 @@
             }).catch(function () {
                 document.getElementById('meshStateLabel').textContent = 'error';
             });
-            loadRloc16();
+            apiGet('/get_properties').then(function (data) {
+                if (data && data.result) {
+                    document.getElementById('meshRloc16').textContent = data.result['Thread:RLOC16'] || '-';
+                    document.getElementById('meshNetworkName').textContent = data.result['Network:Name'] || '-';
+                }
+            }).catch(function () {
+                document.getElementById('meshRloc16').textContent = 'error';
+                document.getElementById('meshNetworkName').textContent = 'error';
+            });
         }
 
         function setThreadState() {
@@ -434,17 +443,9 @@
             }, 3000);
         }
 
-        function loadRloc16() {
-            apiGet('/get_properties').then(function (data) {
-                if (data && data.result) {
-                    document.getElementById('meshRloc16').textContent = data.result['Thread:RLOC16'] || '-';
-                }
-            }).catch(function () { /* ignore */ });
-        }
 
         document.addEventListener('DOMContentLoaded', function () {
             loadThreadState();
-            loadRloc16();
             startMeshPolling();
             apiGet('/config').then(function (res) {
                 if (res && res.result) {
