@@ -31,7 +31,8 @@
                 </div>
                 <div class="info-row">
                     <span class="info-label">Project</span>
-                    <span class="info-value" id="ab-proj">-</span>
+                    <span class="info-value" id="ab-proj"><a href="https://github.com/EPinci/ep-s20-otbr"
+                            target="_blank" id="ab-proj-link">ep-s20-otbr</a></span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Compiled</span>
@@ -119,7 +120,7 @@
             if (!data || data.error || !data.result) return;
             var r = data.result;
             document.getElementById('ab-appver').textContent = r['App:Version'] || '-';
-            document.getElementById('ab-proj').textContent = r['App:ProjectName'] || '-';
+            //document.getElementById('ab-proj').textContent = r['App:ProjectName'] || '-';
             document.getElementById('ab-compile').textContent = r['App:CompileTime'] || '-';
             document.getElementById('ab-idf').textContent = r['IDF:Version'] || '-';
             document.getElementById('ab-ot').textContent = r['OpenThread:Version'] || '-';
