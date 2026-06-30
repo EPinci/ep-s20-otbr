@@ -17,6 +17,7 @@
 #include "esp_br_wifi_config.h"
 #endif
 #include "esp_check.h"
+#include "esp_crt_bundle.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -65,7 +66,6 @@
 #define OTA_RESTART_TASK_STACK_SIZE 2048
 #define OTA_RESTART_DELAY_MS 200
 
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
 #define OTA_URL_MAX_LEN 512
 #define WEB_TAG "obtr_web"
 
@@ -847,12 +847,13 @@ static void ota_release_slot(void)
 static void ota_update_task(void *ctx)
 {
     ota_request_context_t *request = (ota_request_context_t *)ctx;
-    const char *cert_pem = (const char *)server_cert_pem_start;
     esp_http_client_config_t http_config = {
         .url = request->url,
-        .cert_pem = cert_pem,
+        .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = NULL,
         .keep_alive_enable = true,
+        .buffer_size = 8192,
+        .buffer_size_tx = 2048,
     };
     esp_err_t err = esp_br_http_ota(&http_config);
 
