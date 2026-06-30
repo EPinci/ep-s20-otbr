@@ -1002,7 +1002,6 @@ static esp_err_t ota_remote_update_app(const char *url, const esp_partition_t **
 /* Download a full SPIFFS partition image and write it raw to the named data partition. */
 static esp_err_t ota_remote_update_spiffs_partition(const char *url, const char *partition_label)
 {
-    esp_err_t ret = ESP_OK;
     ota_partition_writer_ctx_t writer = {0};
     const esp_partition_t *partition =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, partition_label);
