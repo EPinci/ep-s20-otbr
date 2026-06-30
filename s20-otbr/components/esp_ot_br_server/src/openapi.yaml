@@ -295,9 +295,11 @@ paths:
     post:
       tags:
         - node
-      summary: Queue a remote combined OTA update.
+      summary: Queue a remote full OTA update.
       description: |-
-        Starts a combined host and RCP OTA update from a remote HTTP or HTTPS URL.
+        Starts a full update (app, RCP and web frontend) from a release base URL.
+        The device fetches s20_otbr.bin, rcp_fw.bin and web_storage.bin from that
+        location, applies them and reboots. NVS storage is preserved.
         The request returns immediately after the OTA job is accepted.
       requestBody:
         required: true
@@ -311,8 +313,8 @@ paths:
                 url:
                   type: string
                   format: uri
-                  description: HTTP or HTTPS URL of the combined host+RCP OTA image.
-                  example: https://example.com/otbr_ota.bin
+                  description: HTTP or HTTPS base URL of the folder holding the release assets.
+                  example: https://github.com/epinci/ep-s20-otbr/releases/latest/download/
       responses:
         "202":
           description: OTA request accepted.

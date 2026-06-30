@@ -13,23 +13,29 @@
     <nav class="nav" id="nav"></nav>
     <div class="container">
         <h1 class="page-title">OTA Update</h1>
-        <p class="page-desc">Trigger a combined firmware update from a remote image URL or upload the
-            images directly from your computer.</p>
+        <p class="page-desc">Trigger a full firmware update (app, RCP and web frontend) from a remote release URL or
+            upload the images directly from your computer.</p>
 
         <div class="card section">
             <div class="card-header">Remote Update</div>
             <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
-                Enter the HTTP or HTTPS URL of an host and RCP OTA image produced for this border router.<br />
+                Enter the base URL of a release that contains <strong>s20_otbr.bin</strong>,
+                <strong>rcp_fw.bin</strong> and <strong>web_storage.bin</strong>.<br />
+                The device downloads all three from that location and updates the app, RCP and web frontend in one
+                pass.<br />
                 After a successful download, the device will restart automatically and the web UI may become unavailable
-                for a short time.
+                for a short time.<br />
+                <em>Your settings (NVS, including the Thread dataset) are preserved.</em>
             </p>
             <form id="otaForm" onsubmit="return false">
                 <div class="form-group">
-                    <label class="form-label" for="otaUrl">OTA Image URL *</label>
+                    <label class="form-label" for="otaUrl">Release Base URL *</label>
                     <input class="form-input" id="otaUrl" name="url" type="url"
-                        placeholder="https://example.com/otbr_ota.bin" maxlength="511" required>
+                        value="https://github.com/epinci/ep-s20-otbr/releases/latest/download/"
+                        placeholder="https://github.com/epinci/ep-s20-otbr/releases/latest/download/" maxlength="511"
+                        required>
                     <div class="form-hint">The URL must begin with <strong>http://</strong> or
-                        <strong>https://</strong>.
+                        <strong>https://</strong> and point to the folder holding the release assets.
                     </div>
                 </div>
                 <div class="flex-between">
@@ -74,7 +80,7 @@
                             accept=".bin,application/octet-stream" style="flex:1">
                         <span id="otaWebStatus" style="font-size:12px;white-space:nowrap"></span>
                     </div>
-                    <div class="form-hint">SPIFFS image for the web_storage partition (must be exactly 200&nbsp;KB).
+                    <div class="form-hint">SPIFFS image for the web_storage partition.
                     </div>
                 </div>
                 <div class="flex-between">

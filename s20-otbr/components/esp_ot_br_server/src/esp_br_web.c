@@ -67,6 +67,13 @@
 #define OTA_RESTART_DELAY_MS 200
 
 #define OTA_URL_MAX_LEN 512
+#define OTA_REMOTE_APP_ASSET "s20_otbr.bin"
+#define OTA_REMOTE_RCP_ASSET "rcp_fw.bin"
+#define OTA_REMOTE_WEB_ASSET "web_storage.bin"
+#define OTA_REMOTE_WEB_PARTITION "web_storage"
+#define OTA_REMOTE_URL_MAX_LEN (OTA_URL_MAX_LEN + 32)
+#define OTA_HTTP_MAX_REDIRECTS 10
+#define OTA_HTTP_TIMEOUT_MS 20000
 #define WEB_TAG "obtr_web"
 
 /*-----------------------------------------------------
@@ -844,36 +851,6 @@ static void ota_release_slot(void)
     }
 }
 
-static void ota_update_task(void *ctx)
-{
-    ota_request_context_t *request = (ota_request_context_t *)ctx;
-    esp_http_client_config_t http_config = {
-        .url = request->url,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .event_handler = NULL,
-        .keep_alive_enable = true,
-        .buffer_size = 8192,
-        .buffer_size_tx = 2048,
-    };
-    esp_err_t err = esp_br_http_ota(&http_config);
-
-    if (err != ESP_OK) {
-        ESP_LOGE(WEB_TAG, "OTA update failed for %s: %s", request->url, esp_err_to_name(err));
-        ota_release_slot();
-    } else {
-        ESP_LOGI(WEB_TAG, "OTA image accepted from %s, restarting", request->url);
-    }
-
-    free(request->url);
-    free(request);
-
-    if (err == ESP_OK) {
-        esp_restart();
-    }
-
-    vTaskDelete(NULL);
-}
-
 static void ota_restart_task(void *ctx)
 {
     (void)ctx;
@@ -887,6 +864,220 @@ static esp_err_t ota_begin_host_update(esp_ota_handle_t *host_ota_handle, const 
     ESP_RETURN_ON_FALSE(*update_partition != NULL, ESP_ERR_NOT_FOUND, WEB_TAG, "Failed to find ota partition");
 
     return esp_ota_begin(*update_partition, OTA_WITH_SEQUENTIAL_WRITES, host_ota_handle);
+}
+
+/* Callback invoked for each downloaded chunk during a remote update. */
+typedef esp_err_t (*ota_chunk_writer_t)(void *ctx, const uint8_t *data, size_t len);
+
+typedef struct {
+    const esp_partition_t *partition;
+    size_t offset;
+} ota_partition_writer_ctx_t;
+
+static bool ota_http_status_is_redirect(int status_code)
+{
+    return status_code == 301 || status_code == 302 || status_code == 303 || status_code == 307 || status_code == 308;
+}
+
+/* Stream a single HTTP(S) resource, following redirects, into the supplied writer callback. */
+static esp_err_t ota_http_download(const char *url, ota_chunk_writer_t writer, void *writer_ctx)
+{
+    esp_err_t ret = ESP_OK;
+    int status_code = 0;
+    int redirects = 0;
+    uint8_t *buffer = NULL;
+    esp_http_client_config_t config = {
+        .url = url,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .keep_alive_enable = true,
+        .timeout_ms = OTA_HTTP_TIMEOUT_MS,
+        .buffer_size = FILE_CHUNK_SIZE,
+        .buffer_size_tx = 1024,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    ESP_RETURN_ON_FALSE(client != NULL, ESP_FAIL, WEB_TAG, "Failed to init HTTP client for %s", url);
+
+    do {
+        ESP_GOTO_ON_ERROR(esp_http_client_open(client, 0), cleanup, WEB_TAG, "Failed to open %s", url);
+        if (esp_http_client_fetch_headers(client) < 0) {
+            ret = ESP_FAIL;
+            ESP_LOGE(WEB_TAG, "Failed to fetch headers for %s", url);
+            goto cleanup;
+        }
+        status_code = esp_http_client_get_status_code(client);
+        if (ota_http_status_is_redirect(status_code)) {
+            ESP_GOTO_ON_FALSE(++redirects <= OTA_HTTP_MAX_REDIRECTS, ESP_FAIL, cleanup, WEB_TAG,
+                              "Too many redirects for %s", url);
+            ESP_GOTO_ON_ERROR(esp_http_client_set_redirection(client), cleanup, WEB_TAG,
+                              "Failed to follow redirect for %s", url);
+            char drain[128];
+            while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {
+            }
+            esp_http_client_close(client);
+        }
+    } while (ota_http_status_is_redirect(status_code));
+
+    ESP_GOTO_ON_FALSE(status_code == 200, ESP_FAIL, cleanup, WEB_TAG, "HTTP %d while downloading %s", status_code, url);
+
+    buffer = malloc(FILE_CHUNK_SIZE);
+    ESP_GOTO_ON_FALSE(buffer, ESP_ERR_NO_MEM, cleanup, WEB_TAG, "Failed to allocate download buffer");
+
+    while (true) {
+        int len = esp_http_client_read(client, (char *)buffer, FILE_CHUNK_SIZE);
+        if (len < 0) {
+            ret = ESP_FAIL;
+            ESP_LOGE(WEB_TAG, "Read error while downloading %s", url);
+            break;
+        }
+        if (len == 0) {
+            if (esp_http_client_is_complete_data_received(client)) {
+                break;
+            }
+            ret = ESP_FAIL;
+            ESP_LOGE(WEB_TAG, "Connection closed before %s was fully downloaded", url);
+            break;
+        }
+        ret = writer(writer_ctx, buffer, (size_t)len);
+        if (ret != ESP_OK) {
+            break;
+        }
+    }
+
+cleanup:
+    free(buffer);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return ret;
+}
+
+static esp_err_t ota_app_write_cb(void *ctx, const uint8_t *data, size_t len)
+{
+    return esp_ota_write(*(esp_ota_handle_t *)ctx, data, len);
+}
+
+static esp_err_t ota_partition_write_cb(void *ctx, const uint8_t *data, size_t len)
+{
+    ota_partition_writer_ctx_t *writer = (ota_partition_writer_ctx_t *)ctx;
+
+    ESP_RETURN_ON_FALSE(writer->offset + len <= (size_t)writer->partition->size, ESP_ERR_INVALID_SIZE, WEB_TAG,
+                        "Downloaded image exceeds %s partition size", writer->partition->label);
+    ESP_RETURN_ON_ERROR(esp_partition_write(writer->partition, writer->offset, data, len), WEB_TAG,
+                        "Failed to write %s partition", writer->partition->label);
+    writer->offset += len;
+    return ESP_OK;
+}
+
+/* Compose an asset URL by appending the file name to the release base URL. */
+static esp_err_t ota_build_asset_url(const char *base_url, const char *asset, char *out, size_t out_size)
+{
+    size_t base_len = strlen(base_url);
+    bool has_slash = base_len > 0 && base_url[base_len - 1] == '/';
+    int written = snprintf(out, out_size, "%s%s%s", base_url, has_slash ? "" : "/", asset);
+
+    ESP_RETURN_ON_FALSE(written > 0 && (size_t)written < out_size, ESP_ERR_INVALID_SIZE, WEB_TAG,
+                        "Composed OTA URL is too long");
+    return ESP_OK;
+}
+
+/* Download the app firmware into the inactive OTA slot without activating it yet. */
+static esp_err_t ota_remote_update_app(const char *url, const esp_partition_t **boot_partition)
+{
+    esp_err_t ret = ESP_OK;
+    esp_ota_handle_t handle = 0;
+    const esp_partition_t *partition = NULL;
+
+    ESP_RETURN_ON_ERROR(ota_begin_host_update(&handle, &partition), WEB_TAG, "Failed to begin app OTA");
+
+    ret = ota_http_download(url, ota_app_write_cb, &handle);
+    if (ret != ESP_OK) {
+        esp_ota_abort(handle);
+        return ret;
+    }
+
+    ESP_RETURN_ON_ERROR(esp_ota_end(handle), WEB_TAG, "Downloaded app image is invalid");
+    *boot_partition = partition;
+    return ESP_OK;
+}
+
+/* Download a full SPIFFS partition image and write it raw to the named data partition. */
+static esp_err_t ota_remote_update_spiffs_partition(const char *url, const char *partition_label)
+{
+    esp_err_t ret = ESP_OK;
+    ota_partition_writer_ctx_t writer = {0};
+    const esp_partition_t *partition =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, partition_label);
+    ESP_RETURN_ON_FALSE(partition != NULL, ESP_ERR_NOT_FOUND, WEB_TAG, "Failed to find %s partition", partition_label);
+
+    esp_err_t unregister_ret = esp_vfs_spiffs_unregister(partition_label);
+    if (unregister_ret != ESP_OK && unregister_ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(WEB_TAG, "Could not unmount %s before write: %s", partition_label, esp_err_to_name(unregister_ret));
+    }
+
+    ESP_RETURN_ON_ERROR(esp_partition_erase_range(partition, 0, partition->size), WEB_TAG,
+                        "Failed to erase %s partition", partition_label);
+
+    writer.partition = partition;
+    ESP_RETURN_ON_ERROR(ota_http_download(url, ota_partition_write_cb, &writer), WEB_TAG, "Failed to download %s image",
+                        partition_label);
+
+    ESP_RETURN_ON_FALSE(writer.offset == (size_t)partition->size, ESP_ERR_INVALID_SIZE, WEB_TAG,
+                        "Downloaded %s image (%zu) does not match partition size (%u)", partition_label, writer.offset,
+                        (unsigned)partition->size);
+    return ESP_OK;
+}
+
+/*
+ * Perform a full remote update (app + RCP + web) from a release base URL.
+ *
+ * The app firmware is validated first but only activated once the RCP and web
+ * SPIFFS images have been written, so a failed download never leaves the device
+ * booting a new app paired with stale RCP/web partitions. NVS is never touched.
+ */
+static esp_err_t ota_remote_full_update(const char *base_url)
+{
+    char asset_url[OTA_REMOTE_URL_MAX_LEN];
+    const esp_partition_t *boot_partition = NULL;
+
+    ESP_RETURN_ON_ERROR(ota_build_asset_url(base_url, OTA_REMOTE_APP_ASSET, asset_url, sizeof(asset_url)), WEB_TAG,
+                        "Failed to build app OTA URL");
+    ESP_LOGI(WEB_TAG, "Downloading app firmware from %s", asset_url);
+    ESP_RETURN_ON_ERROR(ota_remote_update_app(asset_url, &boot_partition), WEB_TAG, "App OTA failed");
+
+    ESP_RETURN_ON_ERROR(ota_build_asset_url(base_url, OTA_REMOTE_RCP_ASSET, asset_url, sizeof(asset_url)), WEB_TAG,
+                        "Failed to build RCP OTA URL");
+    ESP_LOGI(WEB_TAG, "Downloading RCP firmware from %s", asset_url);
+    ESP_RETURN_ON_ERROR(ota_remote_update_spiffs_partition(asset_url, CONFIG_RCP_PARTITION_NAME), WEB_TAG,
+                        "RCP OTA failed");
+
+    ESP_RETURN_ON_ERROR(ota_build_asset_url(base_url, OTA_REMOTE_WEB_ASSET, asset_url, sizeof(asset_url)), WEB_TAG,
+                        "Failed to build web OTA URL");
+    ESP_LOGI(WEB_TAG, "Downloading web frontend from %s", asset_url);
+    ESP_RETURN_ON_ERROR(ota_remote_update_spiffs_partition(asset_url, OTA_REMOTE_WEB_PARTITION), WEB_TAG,
+                        "Web OTA failed");
+
+    ESP_RETURN_ON_ERROR(esp_ota_set_boot_partition(boot_partition), WEB_TAG, "Failed to set boot partition");
+    ESP_LOGI(WEB_TAG, "Remote full update complete; rebooting");
+    return ESP_OK;
+}
+
+static void ota_remote_update_task(void *ctx)
+{
+    ota_request_context_t *request = (ota_request_context_t *)ctx;
+    esp_err_t err = ota_remote_full_update(request->url);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(WEB_TAG, "Remote OTA update failed for %s: %s", request->url, esp_err_to_name(err));
+        ota_release_slot();
+    }
+
+    free(request->url);
+    free(request);
+
+    if (err == ESP_OK) {
+        esp_restart();
+    }
+
+    vTaskDelete(NULL);
 }
 
 static esp_err_t ota_receive_uploaded_image(httpd_req_t *req)
@@ -1769,7 +1960,7 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
         http_status = HTTPD_400;
         error = cJSON_CreateNumber((double)ESP_ERR_INVALID_ARG);
         result = create_ota_result("invalid_url", NULL);
-        message = cJSON_CreateString("Provide a valid http:// or https:// OTA URL.");
+        message = cJSON_CreateString("Provide a valid http:// or https:// release base URL.");
         goto respond;
     }
 
@@ -1801,7 +1992,7 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
         goto respond;
     }
 
-    if (xTaskCreate(ota_update_task, "br_ota_web", OTA_TASK_STACK_SIZE, ota_request, OTA_TASK_PRIORITY, NULL) !=
+    if (xTaskCreate(ota_remote_update_task, "br_ota_web", OTA_TASK_STACK_SIZE, ota_request, OTA_TASK_PRIORITY, NULL) !=
         pdPASS) {
         ota_release_slot();
         http_status = HTTPD_500;
@@ -1813,7 +2004,9 @@ static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
 
     error = cJSON_CreateNumber((double)ESP_OK);
     result = create_ota_result("accepted", url->valuestring);
-    message = cJSON_CreateString("OTA accepted. The device will reboot automatically after a successful update.");
+    message = cJSON_CreateString(
+        "Full update accepted. The app, RCP and web images will be downloaded and the device will reboot "
+        "automatically after a successful update.");
     ota_request = NULL;
 
 respond:
