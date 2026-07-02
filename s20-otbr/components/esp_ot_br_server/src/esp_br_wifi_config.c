@@ -1,3 +1,11 @@
+/*
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Wi-Fi Configuration and SoftAP support for ESP Thread Border Router
+ */
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -270,7 +278,12 @@ static void wifi_config_stop_softap(void)
     }
 
     esp_wifi_stop();
-    esp_wifi_deinit();
+
+    /* Always restore STA mode rather than calling esp_wifi_deinit(). If we deinit here, the
+     * managed component's s_wifi_initialized flag remains true, causing the next
+     * esp_ot_wifi_connect() to skip example_wifi_start() and fail with ESP_ERR_WIFI_NOT_INIT. */
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_start();
 
     if (s_ap_netif) {
         esp_netif_destroy(s_ap_netif);
