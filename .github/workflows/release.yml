@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+  release:
+    types: [published]
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -74,19 +77,29 @@ jobs:
           name: esp32s3-otbr-firmware
           path: ./artifacts
 
-      - name: Create GitHub Release and Upload Assets
+      - name: Create/Update GitHub Release with Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME=${{ github.ref_name }}
-
-          echo "Creating release for tag: $TAG_NAME"
-
-          gh release create "$TAG_NAME" \
-            ./artifacts/ota_with_rcp_image \
-            ./artifacts/combined.bin \
-            ./artifacts/s20_otbr.bin \
-            ./artifacts/web_storage.bin \
-            ./artifacts/rcp_fw.bin \
-            --title "Release $TAG_NAME" \
-            --generate-notes
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG_NAME=${{ github.event.release.tag_name }}
+            echo "Uploading assets to existing release: $TAG_NAME"
+            gh release upload "$TAG_NAME" \
+              ./artifacts/ota_with_rcp_image \
+              ./artifacts/combined.bin \
+              ./artifacts/s20_otbr.bin \
+              ./artifacts/web_storage.bin \
+              ./artifacts/rcp_fw.bin \
+              --clobber
+          else
+            TAG_NAME=${{ github.ref_name }}
+            echo "Creating release for tag: $TAG_NAME"
+            gh release create "$TAG_NAME" \
+              ./artifacts/ota_with_rcp_image \
+              ./artifacts/combined.bin \
+              ./artifacts/s20_otbr.bin \
+              ./artifacts/web_storage.bin \
+              ./artifacts/rcp_fw.bin \
+              --title "Release $TAG_NAME" \
+              --generate-notes
+          fi
