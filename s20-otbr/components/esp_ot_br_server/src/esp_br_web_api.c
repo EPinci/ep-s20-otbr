@@ -1568,11 +1568,20 @@ void handle_ot_leader_weight_put_request(uint8_t weight)
 otError handle_ot_become_leader_request(void)
 {
     otError err;
+    otInstance *ins = esp_openthread_get_instance();
     esp_openthread_lock_acquire(portMAX_DELAY);
-    err = otThreadBecomeLeader(esp_openthread_get_instance());
+    uint8_t local_weight = otThreadGetLocalLeaderWeight(ins);
+    uint8_t leader_weight = otThreadGetLeaderWeight(ins);
+    otDeviceRole role = otThreadGetDeviceRole(ins);
+    bool router_eligible = otThreadIsRouterEligible(ins);
+    err = otThreadBecomeLeader(ins);
     esp_openthread_lock_release();
     if (err != OT_ERROR_NONE) {
-        ESP_LOGE(API_TAG, "BecomeLeader failed: %s", otThreadErrorToString(err));
+        ESP_LOGE(API_TAG,
+                 "BecomeLeader failed: %s (role=%s, router_eligible=%d, local leader weight=%u, current leader "
+                 "weight=%u)",
+                 otThreadErrorToString(err), otThreadDeviceRoleToString(role), router_eligible, local_weight,
+                 leader_weight);
     } else {
         ESP_LOGI(API_TAG, "BecomeLeader requested successfully");
     }
