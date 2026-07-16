@@ -25,6 +25,7 @@
 #include "esp_log.h"
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
+#include "esp_openthread_lock.h"
 #include "esp_ot_ota_commands.h"
 #include "esp_ota_ops.h"
 #include "esp_rcp_firmware.h"
@@ -2581,7 +2582,9 @@ static esp_err_t esp_otbr_config_put_handler(httpd_req_t *req)
     if (cJSON_IsString(txpwr_j) && txpwr_j->valuestring && txpwr_j->valuestring[0] != '\0') {
         if (nvs_config_set(NVS_CONFIG_KEY_TH_TXPWR, txpwr_j->valuestring) == ESP_OK) {
             int8_t txpwr = (int8_t)atoi(txpwr_j->valuestring);
+            esp_openthread_lock_acquire(portMAX_DELAY);
             otPlatRadioSetTransmitPower(esp_openthread_get_instance(), txpwr);
+            esp_openthread_lock_release();
             any_set = true;
         }
     }
@@ -2590,7 +2593,9 @@ static esp_err_t esp_otbr_config_put_handler(httpd_req_t *req)
     if (cJSON_IsString(ldrwt_j) && ldrwt_j->valuestring && ldrwt_j->valuestring[0] != '\0') {
         if (nvs_config_set(NVS_CONFIG_KEY_TH_LDR_WT, ldrwt_j->valuestring) == ESP_OK) {
             uint8_t ldrwt = (uint8_t)atoi(ldrwt_j->valuestring);
+            esp_openthread_lock_acquire(portMAX_DELAY);
             otThreadSetLocalLeaderWeight(esp_openthread_get_instance(), ldrwt);
+            esp_openthread_lock_release();
             any_set = true;
         }
     }
