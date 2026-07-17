@@ -1064,6 +1064,43 @@ exit:
     return ret;
 }
 
+/**
+ * @brief Add a border-router RLOC16 to the node info list, skipping duplicates.
+ *        The RLOC16 is masked to its router part so it matches the router nodes
+ *        shown on the topology page.
+ */
+static void add_border_router_rloc16(thread_node_information_t *node, uint16_t rloc16)
+{
+    uint16_t router_rloc16 = rloc16 & 0xfc00; /* keep only the router-id bits */
+    for (uint8_t i = 0; i < node->border_router_number; ++i) {
+        if (node->border_router_rloc16[i] == router_rloc16)
+            return; /* already recorded */
+    }
+    if (node->border_router_number < MAX_BORDER_ROUTER_NUMBER) {
+        node->border_router_rloc16[node->border_router_number++] = router_rloc16;
+    }
+}
+
+/**
+ * @brief Collect the RLOC16s of all routers that have registered network data
+ *        (on-mesh prefixes or external routes). These are the network's border
+ *        routers, as opposed to plain routers that only relay traffic.
+ */
+static void collect_border_router_rloc16(otInstance *ins, thread_node_information_t *node)
+{
+    otNetworkDataIterator iterator = OT_NETWORK_DATA_ITERATOR_INIT;
+    otBorderRouterConfig prefix_config;
+    while (otNetDataGetNextOnMeshPrefix(ins, &iterator, &prefix_config) == OT_ERROR_NONE) {
+        add_border_router_rloc16(node, prefix_config.mRloc16);
+    }
+
+    iterator = OT_NETWORK_DATA_ITERATOR_INIT;
+    otExternalRouteConfig route_config;
+    while (otNetDataGetNextRoute(ins, &iterator, &route_config) == OT_ERROR_NONE) {
+        add_border_router_rloc16(node, route_config.mRloc16);
+    }
+}
+
 static thread_node_information_t get_openthread_node_information(otInstance *ins)
 {
     thread_node_information_t node;
@@ -1086,6 +1123,8 @@ static thread_node_information_t get_openthread_node_information(otInstance *ins
             continue;
         ++node.router_number;
     }
+
+    collect_border_router_rloc16(ins, &node);
     return node;
 }
 

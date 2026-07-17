@@ -761,6 +761,12 @@ cJSON *thread_node_struct_convert2_json(thread_node_information_t *node)
     cJSON_AddNumberToObject(root, "Rloc16", node->rloc16);
     cJSON_AddNumberToObject(root, "NumOfRouter", node->router_number);
 
+    cJSON *border_routers = cJSON_CreateArray();
+    for (uint8_t i = 0; i < node->border_router_number; ++i) {
+        cJSON_AddItemToArray(border_routers, cJSON_CreateNumber(node->border_router_rloc16[i]));
+    }
+    cJSON_AddItemToObject(root, "BorderRouters", border_routers);
+
     return root;
 }
 

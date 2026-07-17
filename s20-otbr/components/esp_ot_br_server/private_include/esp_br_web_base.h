@@ -162,6 +162,8 @@ typedef struct thread_diagnosticTlv_set {
     thread_diagnosticTlv_list_t *diagTlv_next;
 } thread_diagnosticTlv_set_t;
 
+#define MAX_BORDER_ROUTER_NUMBER 16 /* max border-router RLOC16s reported to the topology page */
+
 typedef struct thread_node_information {
     uint32_t role;
     uint32_t router_number;
@@ -171,6 +173,8 @@ typedef struct thread_node_information {
     otIp6Address rloc_address;
     otLeaderData leader_data;
     otNetworkName network_name;
+    uint8_t border_router_number;                            /* number of valid entries in border_router_rloc16 */
+    uint16_t border_router_rloc16[MAX_BORDER_ROUTER_NUMBER]; /* RLOC16s of routers that registered network data */
 } thread_node_information_t;
 
 /*---------------------------------------------

@@ -48,6 +48,13 @@
                     Router
                 </div>
                 <div style="display:flex;align-items:center;gap:6px">
+                    <svg width="18" height="18">
+                        <circle cx="9" cy="9" r="8" fill="none" stroke="#f5a623" stroke-width="2.5" />
+                        <!-- <circle cx="9" cy="9" r="5" fill="#03e2dd" stroke="#484e46" stroke-width="1" /> -->
+                    </svg>
+                    Border Router
+                </div>
+                <div style="display:flex;align-items:center;gap:6px">
                     <svg width="16" height="16">
                         <circle cx="8" cy="8" r="6" fill="#aad4b0" stroke="#484e46" stroke-width="1"
                             stroke-dasharray="2 1" />
@@ -189,6 +196,16 @@
             var count = 0;
             var i, j, d, ln, rloc, child;
 
+            /* Set of border-router RLOC16s (numeric) reported by the BR.
+               A border router is any router that registered network data
+               (on-mesh prefixes / external routes). */
+            var borderRouterSet = {};
+            if (nodeInfo.BorderRouters && nodeInfo.BorderRouters.length) {
+                for (i = 0; i < nodeInfo.BorderRouters.length; i++) {
+                    borderRouterSet[nodeInfo.BorderRouters[i] & 0xfc00] = true;
+                }
+            }
+
             /* Pre-process diagnostic data: convert numeric values to hex strings */
             for (i = 0; i < diagData.length; i++) {
                 d = diagData[i];
@@ -217,6 +234,7 @@
                     rloc16: d._rloc16Str,
                     extAddr: d.ExtAddress || '',
                     role: role,
+                    isBorderRouter: borderRouterSet[d.Rloc16 & 0xfc00] === true,
                     diag: d
                 });
                 count++;
@@ -599,6 +617,22 @@
                     circle.setAttribute('stroke-dasharray', '2 1');
                 }
                 circle.style.cursor = 'pointer';
+
+                /* Border-router marker: an amber outer ring behind the node.
+                   Works for both Leader and Router since it does not change
+                   the node's own fill/stroke. */
+                if (n.isBorderRouter) {
+                    var brRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    var nodeR = (n.role === 'Leader') ? rLeader : rRouter;
+                    brRing.setAttribute('cx', n.x);
+                    brRing.setAttribute('cy', n.y);
+                    brRing.setAttribute('r', nodeR + 3.5);
+                    brRing.setAttribute('fill', 'none');
+                    brRing.setAttribute('stroke', '#f5a623');
+                    brRing.setAttribute('stroke-width', '2.5');
+                    brRing.style.pointerEvents = 'none';
+                    g.appendChild(brRing);
+                }
                 g.appendChild(circle);
 
                 /* Self marker: "this" label inside the circle for the BR's own node */
@@ -709,7 +743,7 @@
                     });
                     gEl.addEventListener('mousemove', function (e) {
                         var rect = container.getBoundingClientRect();
-                        tip.textContent = node.rloc16 + ' (' + node.role + ')';
+                        tip.textContent = node.rloc16 + ' (' + (node.isBorderRouter ? (node.role === 'Leader' ? 'Leader Border Router' : 'Border Router') : node.role) + ')';
                         tip.style.left = (e.clientX - rect.left + 10) + 'px';
                         tip.style.top = (e.clientY - rect.top - 30) + 'px';
                         tip.style.display = 'block';
@@ -758,6 +792,9 @@
 
             var html = '<div class="info-row"><span class="info-label">RLOC16</span><span class="info-value">' + escapeHtml(node.rloc16) + '</span></div>';
             html += '<div class="info-row"><span class="info-label">Role</span><span class="info-value">' + escapeHtml(node.role) + '</span></div>';
+            if (node.role !== 'Child') {
+                html += '<div class="info-row"><span class="info-label">Border Router</span><span class="info-value">' + (node.isBorderRouter ? 'Yes' : 'No') + '</span></div>';
+            }
             if (node.extAddr) {
                 html += '<div class="info-row"><span class="info-label">Extended Address</span><span class="info-value">' + escapeHtml(node.extAddr) + '</span></div>';
             }
