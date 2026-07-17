@@ -7,6 +7,10 @@ on:
   release:
     types: [published]
 
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -81,25 +85,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG_NAME=${{ github.event.release.tag_name }}
-            echo "Uploading assets to existing release: $TAG_NAME"
-            gh release upload "$TAG_NAME" \
-              ./artifacts/ota_with_rcp_image \
-              ./artifacts/combined.bin \
-              ./artifacts/s20_otbr.bin \
-              ./artifacts/web_storage.bin \
-              ./artifacts/rcp_fw.bin \
-              --clobber
-          else
-            TAG_NAME=${{ github.ref_name }}
+          TAG_NAME=${{ github.event.release.tag_name || github.ref_name }}
+
+          # Ensure the release exists (tolerate a concurrent run creating it first).
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             echo "Creating release for tag: $TAG_NAME"
             gh release create "$TAG_NAME" \
-              ./artifacts/ota_with_rcp_image \
-              ./artifacts/combined.bin \
-              ./artifacts/s20_otbr.bin \
-              ./artifacts/web_storage.bin \
-              ./artifacts/rcp_fw.bin \
               --title "Release $TAG_NAME" \
-              --generate-notes
+              --generate-notes || true
           fi
+
+          echo "Uploading assets to release: $TAG_NAME"
+          gh release upload "$TAG_NAME" \
+            ./artifacts/ota_with_rcp_image \
+            ./artifacts/combined.bin \
+            ./artifacts/s20_otbr.bin \
+            ./artifacts/web_storage.bin \
+            ./artifacts/rcp_fw.bin \
+            --clobber
