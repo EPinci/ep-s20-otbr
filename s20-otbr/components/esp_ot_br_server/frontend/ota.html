@@ -27,6 +27,13 @@
                 for a short time.<br />
                 <em>Your settings (NVS, including the Thread dataset) are preserved.</em>
             </p>
+            <p id="otaUpdateNote" class="hidden"
+                style="color:var(--danger);font-size:13px;font-weight:600;margin-bottom:14px">A newer firmware release
+                is available!<br />
+                Current: <span class="update-current"></span><br />
+                Latest: <span class="update-latest"></span> (<a class="update-notes" href="#" target="_blank"
+                    rel="noopener">release notes</a>)
+            </p>
             <form id="otaForm" onsubmit="return false">
                 <div class="form-group">
                     <label class="form-label" for="otaUrl">Release Base URL *</label>
@@ -230,6 +237,26 @@
                 // ignore — device may have already started rebooting
             }
         }
+
+        /* Highlight in red when a newer release is available. */
+        fetchUpdateStatus(function (r) {
+            if (!r || r.status !== 'update_available' || !r.update_available) return;
+            var note = document.getElementById('otaUpdateNote');
+            var latest = note.querySelector('.update-latest');
+            var current = note.querySelector('.update-current');
+            var notes = note.querySelector('.update-notes');
+            if (latest) latest.textContent = r.latest;
+            if (current) current.textContent = r.current;
+            if (notes) {
+                if (r.release_url) {
+                    notes.href = r.release_url;
+                    notes.classList.remove('hidden');
+                } else {
+                    notes.classList.add('hidden');
+                }
+            }
+            note.classList.remove('hidden');
+        });
     </script>
 </body>
 

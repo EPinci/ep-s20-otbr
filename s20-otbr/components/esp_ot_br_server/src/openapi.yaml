@@ -291,6 +291,55 @@ paths:
           description: Successfully created the pending operational dataset.
         "400":
           description: Invalid request body.
+  /ota/check:
+    get:
+      tags:
+        - node
+      summary: Check GitHub for a newer firmware release.
+      description: |-
+        Resolves the latest published release tag on GitHub and compares it to the
+        running firmware version. Nothing is downloaded or installed. The device
+        reads the tag from the redirect of the project's releases/latest page, so no
+        API token is required.
+      responses:
+        "200":
+          description: Version comparison completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: integer
+                    description: 0 on success.
+                  result:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [up_to_date, update_available, check_failed]
+                      current:
+                        type: string
+                        description: Running firmware version (git describe string).
+                        example: v0.2.0-5-gb006f14
+                      latest:
+                        type: string
+                        description: Latest published release tag on GitHub.
+                        example: v0.3.0
+                      update_available:
+                        type: boolean
+                      download_base_url:
+                        type: string
+                        format: uri
+                        description: Base URL of the latest release assets, ready to feed to /ota.
+                      release_url:
+                        type: string
+                        format: uri
+                        description: Human-readable release page with the changelog.
+                  message:
+                    type: string
+        "500":
+          description: Could not reach GitHub to check for updates.
   /ota:
     post:
       tags:

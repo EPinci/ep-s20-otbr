@@ -12,6 +12,16 @@
 <body>
     <nav class="nav" id="nav"></nav>
     <div class="container">
+        <div class="card section hidden" id="ab-update-card">
+            <div style="font-size:14px">
+                <p style="margin-top:10px">A newer firmware release is available!<br />
+                    Current: <strong class="update-current"></strong><br />
+                    Latest: <strong class="update-latest"></strong> (<a class="update-notes hidden" href="#"
+                        target="_blank" rel="noopener">release notes</a>)
+                </p>
+                <p style="margin-top:10px"><a class="btn btn-primary" href="/ota.html">Go to OTA Update</a></p>
+            </div>
+        </div>
         <div class="flex-between mb-16">
             <div>
                 <h1 class="page-title">Dashboard</h1>
@@ -182,6 +192,8 @@
         renderDataset(getCached('/node/dataset/active'));
         loadProperties();
         loadDataset();
+
+        renderUpdateBanner('ab-update-card');
     </script>
 </body>
 

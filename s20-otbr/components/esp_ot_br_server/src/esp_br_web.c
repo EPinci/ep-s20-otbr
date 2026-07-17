@@ -16,11 +16,13 @@
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
 #include "esp_br_wifi_config.h"
 #endif
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+#include "esp_http_client.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_openthread.h"
@@ -32,6 +34,7 @@
 #include "esp_rcp_ota.h"
 #include "esp_spiffs.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_vfs.h"
 #include "http_parser.h"
 #include "protocol_examples_common.h"
@@ -75,6 +78,21 @@
 #define OTA_REMOTE_URL_MAX_LEN (OTA_URL_MAX_LEN + 32)
 #define OTA_HTTP_MAX_REDIRECTS 10
 #define OTA_HTTP_TIMEOUT_MS 20000
+
+/* Update check: resolve the latest published GitHub release without downloading it.
+ * github.com/<owner>/<repo>/releases/latest issues a 302 redirect to
+ * .../releases/tag/<tag>, so the latest tag can be read straight from the
+ * Location header - no API token, User-Agent or JSON parsing required. */
+#define UPDATE_CHECK_REPO "epinci/ep-s20-otbr"
+#define UPDATE_CHECK_LATEST_URL "https://github.com/" UPDATE_CHECK_REPO "/releases/latest"
+#define UPDATE_CHECK_RELEASE_TAG_URL "https://github.com/" UPDATE_CHECK_REPO "/releases/tag/"
+#define UPDATE_CHECK_DOWNLOAD_URL "https://github.com/" UPDATE_CHECK_REPO "/releases/download/"
+#define UPDATE_CHECK_TAG_MARKER "/releases/tag/"
+#define UPDATE_CHECK_TAG_MAX_LEN 64
+#define UPDATE_CHECK_HTTP_TIMEOUT_MS 10000
+#define UPDATE_CHECK_CACHE_TTL_US (6LL * 3600 * 1000000) /* refresh in the background after 6 h */
+#define UPDATE_CHECK_TASK_STACK_SIZE 6144
+#define UPDATE_CHECK_TASK_PRIORITY 4
 #define WEB_TAG "obtr_web"
 
 /*-----------------------------------------------------
@@ -104,6 +122,16 @@ static portMUX_TYPE s_log_buffer_lock = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t s_ota_mutex;
 static bool s_ota_in_progress;
 static bool s_log_hook_installed;
+
+/* Firmware update check cache. The GitHub query runs on a detached worker task so
+ * the single-threaded HTTP server is never blocked; the handler only ever reads
+ * this cached state. Protected by s_update_mutex. */
+static SemaphoreHandle_t s_update_mutex;
+static bool s_update_checking;      /* a worker task is currently querying GitHub */
+static bool s_update_valid;         /* s_update_latest_tag holds a completed result */
+static esp_err_t s_update_last_err; /* error from the most recent completed check */
+static int64_t s_update_checked_at; /* esp_timer timestamp (us) of last success, 0 if never */
+static char s_update_latest_tag[UPDATE_CHECK_TAG_MAX_LEN];
 static uint64_t s_log_write_cursor;
 static char s_log_buffer[LOG_BUFFER_SIZE];
 static vprintf_like_t s_log_vprintf;
@@ -285,6 +313,7 @@ static esp_err_t esp_otbr_network_topology_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_current_node_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_logs_stream_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_ping_post_handler(httpd_req_t *req);
+static esp_err_t esp_otbr_ota_check_get_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_ota_upload_post_handler(httpd_req_t *req);
 static esp_err_t esp_otbr_ota_upload_app_post_handler(httpd_req_t *req);
@@ -371,6 +400,12 @@ static httpd_uri_t s_web_gui_handlers[] = {
         .method = HTTP_POST,
         .handler = esp_otbr_ping_post_handler,
         .user_ctx = &s_server.data,
+    },
+    {
+        .uri = ESP_OT_REST_API_OTA_CHECK_PATH,
+        .method = HTTP_GET,
+        .handler = esp_otbr_ota_check_get_handler,
+        .user_ctx = NULL,
     },
     {
         .uri = ESP_OT_REST_API_OTA_PATH,
@@ -1941,6 +1976,272 @@ exit:
     return ESP_OK;
 }
 
+/*
+ * Parse a "vX.Y.Z[-<ahead>-g<hash>]" git-describe string.
+ *
+ * Fills major/minor/patch and the number of commits ahead of the tag (0 when the
+ * build sits exactly on the tag). Returns false when no X.Y.Z tag can be parsed.
+ */
+static bool update_version_parse(const char *s, int *major, int *minor, int *patch, int *ahead)
+{
+    if (!s) {
+        return false;
+    }
+    if (*s == 'v' || *s == 'V') {
+        s++;
+    }
+    *major = *minor = *patch = *ahead = 0;
+    if (sscanf(s, "%d.%d.%d", major, minor, patch) != 3) {
+        return false;
+    }
+    /* The "-<ahead>-g<hash>" suffix is only present on builds after the tag. */
+    const char *dash = strchr(s, '-');
+    if (dash) {
+        sscanf(dash + 1, "%d", ahead);
+    }
+    return true;
+}
+
+/*
+ * Return true when the tagged release identified by `latest` is strictly newer
+ * than the running build described by `current`.
+ *
+ * A build sitting ahead of its tag (dev build, ahead > 0) is never considered
+ * older than that same tag, so it is not offered an "update" back onto it.
+ */
+static bool update_is_available(const char *current, const char *latest)
+{
+    int cmaj, cmin, cpat, cahead;
+    int lmaj, lmin, lpat, lahead;
+
+    if (!update_version_parse(latest, &lmaj, &lmin, &lpat, &lahead)) {
+        return false; /* Unparseable release tag: fail safe, report no update. */
+    }
+    if (!update_version_parse(current, &cmaj, &cmin, &cpat, &cahead)) {
+        return true; /* Unknown local version: offer the tagged release. */
+    }
+
+    if (lmaj != cmaj) {
+        return lmaj > cmaj;
+    }
+    if (lmin != cmin) {
+        return lmin > cmin;
+    }
+    if (lpat != cpat) {
+        return lpat > cpat;
+    }
+    return false; /* Same tag: up to date (dev builds ahead are not downgraded). */
+}
+
+/*
+ * Resolve the latest published release tag on GitHub.
+ *
+ * Requests .../releases/latest with auto-redirect disabled and reads the tag out
+ * of the 302 Location header (".../releases/tag/<tag>"). This avoids the GitHub
+ * REST API entirely: no token, no User-Agent requirement, no JSON buffering.
+ *
+ * The Location header is captured through the HTTP event handler because
+ * esp_http_client_get_header() only exposes request headers, and the response
+ * header API depends on CONFIG_ESP_HTTP_CLIENT_SAVE_RESPONSE_HEADERS.
+ */
+typedef struct {
+    char *buf;
+    size_t size;
+    bool found;
+} update_location_ctx_t;
+
+static esp_err_t update_http_event_handler(esp_http_client_event_t *evt)
+{
+    if (evt->event_id == HTTP_EVENT_ON_HEADER && evt->header_key && evt->header_value &&
+        strcasecmp(evt->header_key, "Location") == 0) {
+        update_location_ctx_t *ctx = (update_location_ctx_t *)evt->user_data;
+        if (ctx && ctx->buf) {
+            snprintf(ctx->buf, ctx->size, "%s", evt->header_value);
+            ctx->found = true;
+        }
+    }
+    return ESP_OK;
+}
+
+static esp_err_t update_fetch_latest_tag(char *tag_out, size_t tag_size)
+{
+    esp_err_t ret = ESP_OK;
+    const char *marker = NULL;
+    int status_code = 0;
+    char location[256] = {0};
+    update_location_ctx_t loc_ctx = {.buf = location, .size = sizeof(location), .found = false};
+    esp_http_client_config_t config = {
+        .url = UPDATE_CHECK_LATEST_URL,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms = UPDATE_CHECK_HTTP_TIMEOUT_MS,
+        .disable_auto_redirect = true,
+        .event_handler = update_http_event_handler,
+        .user_data = &loc_ctx,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    ESP_RETURN_ON_FALSE(client, ESP_FAIL, WEB_TAG, "Failed to init update-check client");
+
+    ESP_GOTO_ON_ERROR(esp_http_client_open(client, 0), cleanup, WEB_TAG, "Failed to open %s", UPDATE_CHECK_LATEST_URL);
+    if (esp_http_client_fetch_headers(client) < 0) {
+        ret = ESP_FAIL;
+        ESP_LOGE(WEB_TAG, "Failed to fetch headers from %s", UPDATE_CHECK_LATEST_URL);
+        goto cleanup;
+    }
+
+    status_code = esp_http_client_get_status_code(client);
+    ESP_GOTO_ON_FALSE(ota_http_status_is_redirect(status_code), ESP_FAIL, cleanup, WEB_TAG,
+                      "Expected a redirect from releases/latest, got HTTP %d", status_code);
+
+    if (!loc_ctx.found || location[0] == '\0') {
+        ret = ESP_FAIL;
+        ESP_LOGE(WEB_TAG, "No Location header in releases/latest response");
+        goto cleanup;
+    }
+
+    marker = strstr(location, UPDATE_CHECK_TAG_MARKER);
+    ESP_GOTO_ON_FALSE(marker, ESP_FAIL, cleanup, WEB_TAG, "Unexpected redirect target: %s", location);
+    marker += strlen(UPDATE_CHECK_TAG_MARKER);
+
+    if (snprintf(tag_out, tag_size, "%s", marker) >= (int)tag_size) {
+        ret = ESP_ERR_INVALID_SIZE;
+        ESP_LOGE(WEB_TAG, "Release tag exceeds buffer");
+        goto cleanup;
+    }
+    /* Guard against a trailing path segment or stray whitespace in the header. */
+    tag_out[strcspn(tag_out, "/ \t\r\n")] = '\0';
+    ESP_GOTO_ON_FALSE(tag_out[0] != '\0', ESP_FAIL, cleanup, WEB_TAG, "Empty release tag");
+
+cleanup:
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return ret;
+}
+
+/* Detached worker: query GitHub off the HTTP server task and cache the result. */
+static void update_check_task(void *ctx)
+{
+    char tag[UPDATE_CHECK_TAG_MAX_LEN] = {0};
+
+    ESP_LOGI(WEB_TAG, "Update check: querying %s", UPDATE_CHECK_LATEST_URL);
+    esp_err_t err = update_fetch_latest_tag(tag, sizeof(tag));
+
+    if (err == ESP_OK) {
+        const char *current = "";
+        const esp_app_desc_t *app_desc = esp_app_get_description();
+        if (app_desc) {
+            current = app_desc->version;
+        }
+        ESP_LOGI(WEB_TAG, "Update check: latest release is %s (running %s) -> %s", tag, current,
+                 update_is_available(current, tag) ? "update available" : "up to date");
+    } else {
+        ESP_LOGW(WEB_TAG, "Update check: failed to resolve latest release: %s", esp_err_to_name(err));
+    }
+
+    if (s_update_mutex && xSemaphoreTake(s_update_mutex, portMAX_DELAY) == pdTRUE) {
+        s_update_last_err = err;
+        if (err == ESP_OK) {
+            strlcpy(s_update_latest_tag, tag, sizeof(s_update_latest_tag));
+            s_update_valid = true;
+            s_update_checked_at = esp_timer_get_time();
+        }
+        s_update_checking = false;
+        xSemaphoreGive(s_update_mutex);
+    }
+    vTaskDelete(NULL);
+}
+
+/* Spawn a background check unless one is already running. Call with s_update_mutex held. */
+static void update_check_kick_locked(void)
+{
+    if (s_update_checking) {
+        return;
+    }
+    s_update_checking = true;
+    if (xTaskCreate(update_check_task, "br_upd_chk", UPDATE_CHECK_TASK_STACK_SIZE, NULL, UPDATE_CHECK_TASK_PRIORITY,
+                    NULL) != pdPASS) {
+        s_update_checking = false;
+        ESP_LOGW(WEB_TAG, "Failed to start update-check task");
+    }
+}
+
+static esp_err_t esp_otbr_ota_check_get_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ESP_OK;
+    char latest_tag[UPDATE_CHECK_TAG_MAX_LEN] = {0};
+    char url_buf[OTA_REMOTE_URL_MAX_LEN];
+    const char *current = "";
+    bool have_result = false;
+    bool checking = false;
+    bool stale = false;
+    esp_err_t last_err = ESP_OK;
+    cJSON *error = NULL;
+    cJSON *result = NULL;
+    cJSON *message = NULL;
+    cJSON *response = NULL;
+
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    if (app_desc) {
+        current = app_desc->version;
+    }
+
+    /* Read the cached result and, if needed, trigger a background refresh. The
+     * handler itself never touches the network, so it always returns promptly. */
+    if (s_update_mutex && xSemaphoreTake(s_update_mutex, portMAX_DELAY) == pdTRUE) {
+        have_result = s_update_valid;
+        checking = s_update_checking;
+        last_err = s_update_last_err;
+        if (have_result) {
+            strlcpy(latest_tag, s_update_latest_tag, sizeof(latest_tag));
+            stale = (esp_timer_get_time() - s_update_checked_at) > UPDATE_CHECK_CACHE_TTL_US;
+        }
+        if (!have_result || stale) {
+            update_check_kick_locked();
+            checking = s_update_checking;
+        }
+        xSemaphoreGive(s_update_mutex);
+    }
+
+    if (!have_result) {
+        /* Cold cache: report progress (client should re-poll) or the last failure. */
+        result = cJSON_CreateObject();
+        cJSON_AddStringToObject(result, "current", current);
+        cJSON_AddBoolToObject(result, "update_available", false);
+        if (checking) {
+            cJSON_AddStringToObject(result, "status", "checking");
+            error = cJSON_CreateNumber((double)ESP_OK);
+            message = cJSON_CreateString("Checking GitHub for updates...");
+        } else {
+            cJSON_AddStringToObject(result, "status", "check_failed");
+            error = cJSON_CreateNumber((double)(last_err != ESP_OK ? last_err : ESP_FAIL));
+            message = cJSON_CreateString("Could not reach GitHub to check for updates.");
+        }
+        goto respond;
+    }
+
+    bool update_available = update_is_available(current, latest_tag);
+    result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", update_available ? "update_available" : "up_to_date");
+    cJSON_AddStringToObject(result, "current", current);
+    cJSON_AddStringToObject(result, "latest", latest_tag);
+    cJSON_AddBoolToObject(result, "update_available", update_available);
+    snprintf(url_buf, sizeof(url_buf), "%s%s/", UPDATE_CHECK_DOWNLOAD_URL, latest_tag);
+    cJSON_AddStringToObject(result, "download_base_url", url_buf);
+    snprintf(url_buf, sizeof(url_buf), "%s%s", UPDATE_CHECK_RELEASE_TAG_URL, latest_tag);
+    cJSON_AddStringToObject(result, "release_url", url_buf);
+
+    error = cJSON_CreateNumber((double)ESP_OK);
+    message = cJSON_CreateString(update_available ? "A newer release is available." : "The device is up to date.");
+
+respond:
+    response = pack_response(error, result, message);
+    ESP_GOTO_ON_FALSE(response, ESP_FAIL, exit, WEB_TAG, "Failed to build update-check response");
+    ESP_GOTO_ON_ERROR(httpd_send_packet(req, response), exit, WEB_TAG, "Failed to respond %s", req->uri);
+
+exit:
+    cJSON_Delete(response);
+    return ret;
+}
+
 static esp_err_t esp_otbr_ota_post_handler(httpd_req_t *req)
 {
     esp_err_t ret = ESP_OK;
@@ -3040,6 +3341,11 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path, const cha
     if (!s_ota_mutex) {
         s_ota_mutex = xSemaphoreCreateMutex();
         ESP_RETURN_ON_FALSE(s_ota_mutex, NULL, WEB_TAG, "Failed to create OTA mutex");
+    }
+
+    if (!s_update_mutex) {
+        s_update_mutex = xSemaphoreCreateMutex();
+        ESP_RETURN_ON_FALSE(s_update_mutex, NULL, WEB_TAG, "Failed to create update-check mutex");
     }
 
 #if CONFIG_SPIRAM

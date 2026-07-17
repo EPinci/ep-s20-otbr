@@ -38,6 +38,7 @@ void esp_br_web_api_init(void);
 #define ESP_OT_REST_API_MESH_TOPOLOGY_PATH "/mesh/topology"
 #define ESP_OT_REST_API_LOGS_STREAM_PATH "/logs/stream"
 #define ESP_OT_REST_API_CONFIG_PATH "/config"
+#define ESP_OT_REST_API_OTA_CHECK_PATH "/ota/check"
 /* HTTP POST */
 #define ESP_OT_REST_API_PING_PATH "/ping"
 #define ESP_OT_REST_API_OTA_PATH "/ota"

@@ -109,6 +109,58 @@ function checkThreadState(callback) {
 }
 
 /**
+ * Fetch the firmware update status from the device (GET /ota/check).
+ * Calls cb(result) with the parsed result object, or cb(null) on any failure.
+ * The device answers instantly from cache; while it queries GitHub in the
+ * background it replies with status "checking", so re-poll a few times until a
+ * final result lands. The check is best-effort: connectivity failures must
+ * never break a page.
+ */
+function fetchUpdateStatus(cb, _attempt) {
+  _attempt = _attempt || 0;
+  apiGet('/ota/check')
+    .then(function (data) {
+      var r = data && data.result ? data.result : null;
+      if (r && r.status === 'checking' && _attempt < 5) {
+        setTimeout(function () { fetchUpdateStatus(cb, _attempt + 1); }, 3000);
+        return;
+      }
+      cb(r);
+    })
+    .catch(function () {
+      cb(null);
+    });
+}
+
+/**
+ * Reveal the firmware update banner and populate its variable fields. The banner
+ * markup lives in each page's HTML; this only fills in the version numbers and
+ * the release link. The banner is shown only when a newer release is available;
+ * when the device is up to date (or the check fails) nothing is displayed.
+ */
+function renderUpdateBanner(cardId) {
+  fetchUpdateStatus(function (r) {
+    if (!r || r.status !== 'update_available' || !r.update_available) return;
+    var card = document.getElementById(cardId);
+    if (!card) return;
+    var latest = card.querySelector('.update-latest');
+    var current = card.querySelector('.update-current');
+    var notes = card.querySelector('.update-notes');
+    if (latest) latest.textContent = r.latest;
+    if (current) current.textContent = r.current;
+    if (notes) {
+      if (r.release_url) {
+        notes.href = r.release_url;
+        notes.classList.remove('hidden');
+      } else {
+        notes.classList.add('hidden');
+      }
+    }
+    card.classList.remove('hidden');
+  });
+}
+
+/**
  * Disable all interactive elements inside a management page and show
  * a banner when the Thread network is not connected.
  * Call from management sub-pages (except network.html which is always active).
