@@ -10,11 +10,11 @@ This is a minimalist, performance oriented firmare that supports:
     - TREL support
     - BBR support
     - Home Assistant OTBR integration
-- [esp-thread-br](https://github.com/espressif/esp-thread-br) -> main @ 4da952
+- [esp-thread-br](https://github.com/espressif/esp-thread-br) -> main @ 29a2345
     - Used as base framework
     - Implemented only wired connectivity in order to keep the radio for Thread use only
     - Forked basic Web UI to add logs, remote/local OTA and more
-- [s20_thread_br_opensdk](https://github.com/gl-inet/s20_thread_br_opensdk) -> main @ 2b610f
+- [s20_thread_br_opensdk](https://github.com/gl-inet/s20_thread_br_opensdk) -> main @ 2b610f8
     - Leveraged primarily for LED support, PIN layout and base IDF settings
 
 **Use at your own risk!** (but you can always flash back the original firmware...)
