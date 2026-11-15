@@ -1,6 +1,7 @@
 #pragma once
 
 #include "openthread/border_agent.h"
+#include "openthread/commissioner.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,7 +23,7 @@ extern "C" {
 #define WPAN_STATUS_OFFLINE "offline"
 #define WPAN_STATUS_ASSOCIATED "associated"
 #define WPAN_STATUS_ASSOCIATING "associating"
-#define NETWORK_PASSPHRASE_MAX_SIZE 64
+#define NETWORK_PASSPHRASE_MAX_SIZE (OT_COMMISSIONING_PASSPHRASE_MAX_SIZE + 1)
 #define NETWORK_PSKD_MAX_SIZE 64
 #define CREDENTIAL_TYPE_NETWORK_KEY "networkKeyType"
 #define CREDENTIAL_TYPE_PSKD "pskdType"
@@ -130,9 +131,7 @@ typedef struct thread_network_form_param {
     otPanId panid;
     otExtendedPanId extended_panid;
     otNetworkKey network_key;
-    char on_mesh_prefix[OT_IP6_PREFIX_STRING_SIZE + 3];
     char passphrase[NETWORK_PASSPHRASE_MAX_SIZE];
-    bool default_route;
 } thread_network_formation_param_t;
 
 /*---------------------------------------------

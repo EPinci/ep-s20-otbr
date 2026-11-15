@@ -74,8 +74,6 @@ CONFIG_OPENTHREAD_RCP_COMMAND=y
 
 # OpenThread Border Router Example
 CONFIG_AUTO_UPDATE_RCP=y
-# S20 host GPIOs controlling H2 reset and boot; GPIO7/8 are LED/UART pins.
-# https://docs.gl-inet.com/iot/en/thread_board_router/gl-s20/hardware/#gpio-list
 CONFIG_DEFAULT_PIN_TO_RCP_RESET=2
 CONFIG_DEFAULT_PIN_TO_RCP_BOOT=3
 
