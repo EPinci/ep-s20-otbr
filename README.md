@@ -5,7 +5,7 @@ Luckily enough, they shared an [OpenSDK](https://github.com/gl-inet/s20_thread_b
 
 This is a minimalist, performance oriented firmare that supports:
 
-- [esp-idf](https://github.com/espressif/esp-idf) -> v6.1
+- [esp-idf](https://github.com/espressif/esp-idf) -> v6.1.1
     - Thread v1.4
     - TREL support
     - BBR support
