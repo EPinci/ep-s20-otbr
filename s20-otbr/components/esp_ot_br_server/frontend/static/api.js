@@ -216,7 +216,7 @@ function disableManagementPage() {
   var p = location.pathname;
 
   var html =
-    '<a href="/" class="nav-brand"><img src="/otbr.png" width="22" height="22" alt="Espressif"> Espressif Thread Border Router</a><ul class="nav-links">';
+    '<a href="/" class="nav-brand"><img src="/otbr.png" width="22" height="22" alt="EPinci">EPinci Thread Border Router</a><ul class="nav-links">';
   for (var i = 0; i < pages.length; i++) {
     var pg = pages[i];
     if (pg.children) {
