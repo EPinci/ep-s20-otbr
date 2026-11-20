@@ -21,6 +21,9 @@ This is a minimalist, performance oriented firmare that supports:
 
 ## Getting started
 
+### Bulding the firmware
+
+Prepare the workspace:
 ```
 git clone --recursive https://github.com/epinci/ep-s20-otbr.git
 git submodule update --init --recursive
@@ -43,7 +46,16 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-First deployment must use a USB connection, subsequent updates can be pushed by network.
+_As an alternative, a pre-built combined image ready for deployment is available in each release._
+
+### First deployment
+
+> **This will erase any configuration stored in the device**: make sure to back it up first!  
+> Configuration backup from other firmwares cannot be used with this firmware.  
+> If you want to preserve an existing network, either rejoin form another OTBR or save and manually restore the network name and key.
+
+
+First deployment must use a USB connection, subsequent updates can be pushed by network.  
 If you're using WSL, check [Connect USB devices to WSL](https://learn.microsoft.com/en-us/windows/wsl/connect-usb)
 
 To erase the flash with a USB cable (recommended before flashing the firmware):
@@ -60,12 +72,23 @@ $ idf.py -p /dev/ttyUSB0 monitor
 ```
 To exit monitor use `Ctrl + ]` or `CTRL + T, CTRL + X`
 
+_As an alternative, a pre-built combined image file can be flashed with a tool of choice:_
+```
+esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x0 combined.bin
+```
+
+More [flashing procedures](docs/moreflash.md).
+
+### Subsequent deployments
+
 After the first flash you can push a build with:
 ```
 $ ./script/push-update.sh <IP-ADDRESS>
 ```
-
-More [flashing procedures](docs/moreflash.md).
+This firmware also features:
+- a **web interface deployment** option
+- a **direct download deployment** option
+- new release notification from this repo's releases
 
 ## Integrating with Home Assistant
 
